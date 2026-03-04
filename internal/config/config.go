@@ -16,13 +16,15 @@ type Config struct {
 	Port            string
 	MaxHistory      int
 	MaxTurns        int
+	AgentName       string
+	Language        string
 }
 
 func LoadConfig() *Config {
 	return &Config{
 		TelegramToken:   getEnv("TELEGRAM_TOKEN", ""),
 		TelegramAllowID: getEnv("TELEGRAM_ALLOW_ID", ""),
-		ZAIEndpoint:     getEnv("ZAI_ENDPOINT", "http://localhost:8080/v1/chat/completions"),
+		ZAIEndpoint:     getEnv("ZAI_ENDPOINT", ""),
 		ZAIApiKey:       getEnv("ZAI_API_KEY", ""),
 		WorkspaceRoot:   getEnv("WORKSPACE_ROOT", "."),
 		DBPath:          getEnv("DB_PATH", "agent.db"),
@@ -30,6 +32,8 @@ func LoadConfig() *Config {
 		Port:            getEnv("PORT", "8080"),
 		MaxHistory:      getEnvInt("MAX_HISTORY", 25),
 		MaxTurns:        getEnvInt("MAX_TURNS", 50),
+		AgentName:       getEnv("AGENT_NAME", "Cronos"),
+		Language:        getEnv("LANGUAGE", "en"),
 	}
 }
 

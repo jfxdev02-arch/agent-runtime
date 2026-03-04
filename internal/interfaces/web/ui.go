@@ -2,14 +2,14 @@ package web
 
 func getIndexHTML() string {
 	return `<!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cronos — Agentic Runtime</title>
+<title>Agent Runtime</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root{--bg0:#060a10;--bg1:#0a0e17;--bg2:#111827;--bg3:#1a2332;--bg4:#1f2b3d;--bg-in:#0d1420;--brd:#1e2d3d;--brd-a:#3b82f6;--t1:#e2e8f0;--t2:#94a3b8;--t3:#64748b;--ac:#3b82f6;--ac2:#8b5cf6;--acg:rgba(59,130,246,.3);--ok:#10b981;--warn:#f59e0b;--err:#ef4444;--g1:linear-gradient(135deg,#3b82f6,#8b5cf6);--g2:linear-gradient(135deg,#06b6d4,#3b82f6);--gl:rgba(17,24,39,.8);--sh:0 8px 32px rgba(0,0,0,.4);--r:12px;--tr:all .3s cubic-bezier(.4,0,.2,1)}
+:root{--bg0:#060a10;--bg1:#0a0e17;--bg2:#111827;--bg3:#1a2332;--bg4:#1f2b3d;--bg-in:#0d1420;--brd:#1e2d3d;--brd-a:#3b82f6;--t1:#e2e8f0;--t2:#94a3b8;--t3:#64748b;--ac:#3b82f6;--ac2:#8b5cf6;--acg:rgba(59,130,246,.3);--ok:#10b981;--warn:#f59e0b;--err:#ef4444;--g1:linear-gradient(135deg,#3b82f6,#8b5cf6);--g2:linear-gradient(135deg,#06b6d4,#3b82f6);--sh:0 8px 32px rgba(0,0,0,.4);--r:12px;--tr:all .3s cubic-bezier(.4,0,.2,1)}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height:100vh;overflow:hidden;display:flex}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
@@ -32,7 +32,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .btn-sm{padding:6px 12px;font-size:12px;border-radius:8px}
 .btn-ghost{background:var(--bg3);color:var(--t2);border:1px solid var(--brd)}.btn-ghost:hover{border-color:var(--ac);color:var(--t1)}
 .btn-danger{background:rgba(239,68,68,.15);color:var(--err);border:1px solid rgba(239,68,68,.2)}.btn-danger:hover{background:rgba(239,68,68,.25)}
-/* Chat */
 .chat-c{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:16px}
 .msg{max-width:80%;padding:14px 18px;border-radius:16px;font-size:14px;line-height:1.6;animation:fadeIn .3s ease;word-wrap:break-word;white-space:pre-wrap}
@@ -45,7 +44,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .chat-in textarea:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acg)}
 .send-btn{width:52px;height:52px;background:var(--g1);border:none;border-radius:var(--r);color:#fff;font-size:20px;cursor:pointer;transition:var(--tr);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .send-btn:hover{transform:scale(1.05)}.send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
-/* Settings */
 .scroll{flex:1;overflow-y:auto;padding:24px 28px}
 .sec{margin-bottom:28px}.sec h2{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:16px}
 .card{background:var(--bg3);border:1px solid var(--brd);border-radius:var(--r);padding:16px 20px;margin-bottom:12px;transition:var(--tr)}
@@ -54,33 +52,28 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .card input,.card select,.card textarea{width:100%;background:var(--bg-in);border:1px solid var(--brd);color:var(--t1);border-radius:8px;padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:0;transition:var(--tr)}
 .card input:focus,.card select:focus,.card textarea:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acg)}
 .card textarea{font-family:'Inter',sans-serif;resize:vertical;min-height:60px}
-/* Logs */
 .log-e{background:var(--bg3);border:1px solid var(--brd);border-radius:var(--r);padding:14px 18px;margin-bottom:10px;cursor:pointer;transition:var(--tr)}
-.log-e:hover{border-color:var(--brd-a)}
-.log-h{display:flex;align-items:center;gap:10px}.log-tool{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;color:var(--ac)}
+.log-e:hover{border-color:var(--brd-a)}.log-h{display:flex;align-items:center;gap:10px}
+.log-tool{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;color:var(--ac)}
 .log-s{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
 .log-ok{background:rgba(16,185,129,.15);color:var(--ok)}.log-err{background:rgba(239,68,68,.15);color:var(--err)}
 .log-t{font-size:11px;color:var(--t3);margin-left:auto}
 .log-d{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--t2);line-height:1.5;max-height:0;overflow:hidden;transition:max-height .3s;white-space:pre-wrap;word-break:break-all}
 .log-e.exp .log-d{max-height:400px;overflow-y:auto;padding-top:10px;border-top:1px solid var(--brd);margin-top:8px}
-/* Status */
 .st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:28px}
 .st-c{background:var(--bg3);border:1px solid var(--brd);border-radius:var(--r);padding:20px;transition:var(--tr)}
 .st-c:hover{border-color:var(--brd-a);transform:translateY(-2px);box-shadow:var(--sh)}
 .st-l{font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin-bottom:8px}
 .st-v{font-size:28px;font-weight:700;background:var(--g2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .st-s{font-size:12px;color:var(--t2);margin-top:4px}
-/* Projects */
-.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;padding:24px 28px}
-.proj-card{background:var(--bg3);border:1px solid var(--brd);border-radius:var(--r);padding:20px;transition:var(--tr);cursor:pointer;position:relative}
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;padding:24px 28px;overflow-y:auto}
+.proj-card{background:var(--bg3);border:1px solid var(--brd);border-radius:var(--r);padding:20px;transition:var(--tr);cursor:pointer}
 .proj-card:hover{border-color:var(--brd-a);transform:translateY(-2px);box-shadow:var(--sh)}
 .proj-name{font-size:16px;font-weight:600;margin-bottom:6px}
 .proj-path{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3);margin-bottom:12px;word-break:break-all}
 .proj-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .proj-tech{font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(139,92,246,.15);color:var(--ac2)}
 .proj-branch{font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(6,182,212,.15);color:#06b6d4}
-.proj-actions{display:flex;gap:8px;margin-top:12px;border-top:1px solid var(--brd);padding-top:12px}
-/* Modal */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:100;display:none;align-items:center;justify-content:center}
 .modal-bg.show{display:flex}
 .modal{background:var(--bg2);border:1px solid var(--brd);border-radius:16px;width:90%;max-width:700px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:fadeIn .3s}
@@ -104,7 +97,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 </head>
 <body>
 <aside class="sidebar">
-  <div class="logo">C</div>
+  <div class="logo" id="logoLetter">A</div>
   <button class="nav-btn active" onclick="showPage('chat',this)" title="Chat">💬</button>
   <button class="nav-btn" onclick="showPage('projects',this)" title="Projects">📁</button>
   <button class="nav-btn" onclick="showPage('settings',this)" title="Settings">⚙️</button>
@@ -112,72 +105,70 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
   <button class="nav-btn" onclick="showPage('status',this)" title="Status">📊</button>
 </aside>
 <main class="main">
-  <!-- CHAT -->
   <div id="page-chat" class="page active">
-    <div class="hdr"><h1>Cronos — Chat</h1><span class="badge badge-on">● Online</span></div>
+    <div class="hdr"><h1 id="chatTitle">Chat</h1><span class="badge badge-on">● Online</span></div>
     <div class="chat-c"><div class="msgs" id="messages"></div>
-      <div class="chat-in"><textarea id="chatInput" placeholder="Envie uma mensagem..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
+      <div class="chat-in"><textarea id="chatInput" placeholder="" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
         <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button></div>
     </div>
   </div>
-  <!-- PROJECTS -->
   <div id="page-projects" class="page">
-    <div class="hdr"><h1>Projetos</h1>
-      <div style="display:flex;gap:8px"><button class="btn btn-ghost" onclick="scanProjects()">🔍 Scan Workspace</button><button class="btn btn-primary" onclick="showAddProject()">+ Novo Projeto</button></div>
+    <div class="hdr"><h1 id="projTitle">Projects</h1>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost" onclick="scanProjects()" id="btnScan">🔍 Scan</button><button class="btn btn-primary" onclick="showAddProject()" id="btnNewProj">+ New</button></div>
     </div>
-    <div class="proj-grid" id="projGrid"><p style="color:var(--t3);text-align:center;padding:40px;grid-column:1/-1">Carregando...</p></div>
+    <div class="proj-grid" id="projGrid"></div>
   </div>
-  <!-- SETTINGS -->
   <div id="page-settings" class="page">
-    <div class="hdr"><h1>Configuracoes</h1><button class="btn btn-primary" onclick="saveSettings()">Salvar</button></div>
+    <div class="hdr"><h1 id="setTitle">Settings</h1><button class="btn btn-primary" onclick="saveSettings()" id="btnSave">Save</button></div>
     <div class="scroll">
       <div class="sec"><h2>LLM / API</h2>
-        <div class="card"><label>Z.AI Endpoint</label><input type="text" id="set-zai_endpoint"></div>
-        <div class="card"><label>Z.AI API Key</label><input type="password" id="set-zai_api_key"></div>
-        <div class="card"><label>Modelo LLM</label><input type="text" id="set-model"></div>
+        <div class="card"><label>Endpoint</label><input type="text" id="set-zai_endpoint"></div>
+        <div class="card"><label>API Key</label><input type="password" id="set-zai_api_key"></div>
+        <div class="card"><label>Model</label><input type="text" id="set-model"></div>
       </div>
       <div class="sec"><h2>Telegram</h2>
-        <div class="card"><label>Token do Bot</label><input type="password" id="set-telegram_token"></div>
+        <div class="card"><label>Bot Token</label><input type="password" id="set-telegram_token"></div>
         <div class="card"><label>Allow ID</label><input type="text" id="set-telegram_allow_id"></div>
       </div>
       <div class="sec"><h2>GitHub</h2>
-        <div class="card"><label>GitHub Token (Personal Access Token)</label><input type="password" id="set-github_token"></div>
-        <div class="card"><label>GitHub Username</label><input type="text" id="set-github_username"></div>
+        <div class="card"><label>Personal Access Token</label><input type="password" id="set-github_token"></div>
+        <div class="card"><label>Username</label><input type="text" id="set-github_username"></div>
       </div>
       <div class="sec"><h2>Runtime</h2>
+        <div class="card"><label>Agent Name</label><input type="text" id="set-agent_name"></div>
+        <div class="card"><label id="lblLang">Language</label>
+          <select id="set-language"><option value="en">English</option><option value="pt-BR">Português (Brasil)</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="zh">中文</option></select>
+        </div>
         <div class="card"><label>Workspace Root</label><input type="text" id="set-workspace_root"></div>
-        <div class="card"><label>Max Historico</label><input type="number" id="set-max_history"></div>
-        <div class="card"><label>Max Turnos</label><input type="number" id="set-max_turns"></div>
+        <div class="card"><label>Max History</label><input type="number" id="set-max_history"></div>
+        <div class="card"><label>Max Turns</label><input type="number" id="set-max_turns"></div>
       </div>
     </div>
   </div>
-  <!-- LOGS -->
   <div id="page-logs" class="page">
-    <div class="hdr"><h1>Tool Logs</h1><button class="btn btn-ghost" onclick="loadLogs()">Atualizar</button></div>
+    <div class="hdr"><h1 id="logTitle">Tool Logs</h1><button class="btn btn-ghost" onclick="loadLogs()" id="btnRefreshLogs">Refresh</button></div>
     <div class="scroll" id="logsC"></div>
   </div>
-  <!-- STATUS -->
   <div id="page-status" class="page">
-    <div class="hdr"><h1>Status</h1><button class="btn btn-ghost" onclick="loadStatus()">Atualizar</button></div>
+    <div class="hdr"><h1 id="statTitle">System Status</h1><button class="btn btn-ghost" onclick="loadStatus()" id="btnRefreshStatus">Refresh</button></div>
     <div class="scroll" id="statusC"></div>
   </div>
 </main>
-<!-- MODALS -->
 <div class="modal-bg" id="projModal"><div class="modal">
-  <div class="modal-hdr"><h2 id="modalTitle">Projeto</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
-  <div class="modal-tabs" id="modalTabs">
-    <button class="modal-tab active" onclick="showTab('overview',this)">Visao Geral</button>
+  <div class="modal-hdr"><h2 id="modalTitle">Project</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+  <div class="modal-tabs">
+    <button class="modal-tab active" onclick="showTab('overview',this)" id="tabOverview">Overview</button>
     <button class="modal-tab" onclick="showTab('git',this)">Git</button>
-    <button class="modal-tab" onclick="showTab('notes',this)">Notas</button>
+    <button class="modal-tab" onclick="showTab('notes',this)" id="tabNotes">Notes</button>
   </div>
   <div class="modal-body">
     <div class="tab-panel active" id="tab-overview">
-      <div class="card"><label>Nome</label><input type="text" id="proj-name"></div>
-      <div class="card"><label>Descricao</label><input type="text" id="proj-desc"></div>
-      <div class="card"><label>Status</label><select id="proj-status"><option value="active">Ativo</option><option value="paused">Pausado</option><option value="done">Concluido</option><option value="archived">Arquivado</option></select></div>
+      <div class="card"><label id="lblName">Name</label><input type="text" id="proj-name"></div>
+      <div class="card"><label id="lblDesc">Description</label><input type="text" id="proj-desc"></div>
+      <div class="card"><label>Status</label><select id="proj-status"><option value="active">Active</option><option value="paused">Paused</option><option value="done">Done</option><option value="archived">Archived</option></select></div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn btn-primary" onclick="saveProject()">Salvar</button>
-        <button class="btn btn-danger" onclick="deleteProject()">Excluir</button>
+        <button class="btn btn-primary" onclick="saveProject()" id="btnSaveProj">Save</button>
+        <button class="btn btn-danger" onclick="deleteProject()" id="btnDelProj">Delete</button>
       </div>
     </div>
     <div class="tab-panel" id="tab-git">
@@ -186,83 +177,111 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
         <button class="btn btn-ghost btn-sm" onclick="gitAction('push')">⬆ Push</button>
         <button class="btn btn-ghost btn-sm" onclick="gitAction('init')">🆕 Git Init</button>
       </div>
-      <div class="card"><label>Branch Atual</label><div class="git-pre" id="git-branch">-</div></div>
+      <div class="card"><label>Current Branch</label><div class="git-pre" id="git-branch">-</div></div>
       <div class="card"><label>Branches</label><div class="git-pre" id="git-branches">-</div></div>
-      <div class="card" style="margin-bottom:8px"><label>Commit Message</label><input type="text" id="git-commit-msg" placeholder="Descricao do commit"></div>
+      <div class="card" style="margin-bottom:8px"><label>Commit Message</label><input type="text" id="git-commit-msg" placeholder="Describe your changes"></div>
       <button class="btn btn-primary btn-sm" onclick="gitAction('commit')" style="margin-bottom:16px">✔ Commit All</button>
-      <div class="card"><label>Nova Branch / Checkout</label><input type="text" id="git-branch-name" placeholder="nome-da-branch"></div>
+      <div class="card"><label>Branch Name</label><input type="text" id="git-branch-name" placeholder="feature/my-branch"></div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-ghost btn-sm" onclick="gitAction('new_branch')">+ Nova Branch</button>
+        <button class="btn btn-ghost btn-sm" onclick="gitAction('new_branch')">+ New Branch</button>
         <button class="btn btn-ghost btn-sm" onclick="gitAction('checkout')">↩ Checkout</button>
       </div>
-      <div class="card" style="margin-top:16px"><label>Status (git status)</label><div class="git-pre" id="git-status">-</div></div>
-      <div class="card"><label>Ultimos Commits</label><div class="git-pre" id="git-log">-</div></div>
+      <div class="card" style="margin-top:16px"><label>Status</label><div class="git-pre" id="git-status">-</div></div>
+      <div class="card"><label>Recent Commits</label><div class="git-pre" id="git-log">-</div></div>
       <div class="card"><label>Remote</label><div class="git-pre" id="git-remote">-</div></div>
     </div>
     <div class="tab-panel" id="tab-notes">
-      <div class="card"><label>Notas do Projeto (highlights, pendencias, estado)</label>
-        <textarea id="proj-notes" rows="12" style="min-height:200px" placeholder="# Highlights&#10;- ...&#10;&#10;# Pendencias&#10;- ...&#10;&#10;# Estado&#10;..."></textarea>
+      <div class="card"><label>Project Notes (highlights, tasks, status)</label>
+        <textarea id="proj-notes" rows="12" style="min-height:200px" placeholder="# Highlights&#10;- ...&#10;&#10;# TODO&#10;- ...&#10;&#10;# Status&#10;..."></textarea>
       </div>
-      <button class="btn btn-primary" onclick="saveProject()">Salvar Notas</button>
+      <button class="btn btn-primary" onclick="saveProject()">Save Notes</button>
     </div>
   </div>
 </div></div>
 <div class="modal-bg" id="addModal"><div class="modal" style="max-width:500px">
-  <div class="modal-hdr"><h2>Adicionar Projeto</h2><button class="modal-close" onclick="closeAddModal()">&times;</button></div>
+  <div class="modal-hdr"><h2 id="addTitle">Add Project</h2><button class="modal-close" onclick="closeAddModal()">&times;</button></div>
   <div class="modal-body">
-    <div class="card"><label>Nome</label><input type="text" id="add-name" placeholder="Meu Projeto"></div>
-    <div class="card"><label>Caminho no Sistema</label><input type="text" id="add-path" placeholder="/home/user/projeto"></div>
-    <div class="card"><label>Descricao</label><input type="text" id="add-desc" placeholder="Descricao do projeto"></div>
+    <div class="card"><label>Name</label><input type="text" id="add-name" placeholder="My Project"></div>
+    <div class="card"><label>System Path</label><input type="text" id="add-path" placeholder="/home/user/project"></div>
+    <div class="card"><label>Description</label><input type="text" id="add-desc" placeholder="Project description"></div>
     <div class="card"><label>Tech Stack</label><input type="text" id="add-tech" placeholder="Go, React, Python..."></div>
-    <button class="btn btn-primary" onclick="addProject()" style="margin-top:12px">Adicionar</button>
+    <button class="btn btn-primary" onclick="addProject()" style="margin-top:12px" id="btnAddProj">Add</button>
   </div>
 </div></div>
 <script>
-let currentProj=null;
+let currentProj=null, appCfg={agent_name:'Agent',language:'en'};
 const esc=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 const escPre=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+// i18n
+const i18n={
+  en:{chat:'Chat',projects:'Projects',settings:'Settings',logs:'Tool Logs',status:'System Status',save:'Save',refresh:'Refresh',scan:'🔍 Scan Workspace',newProj:'+ New Project',addProj:'Add Project',add:'Add',overview:'Overview',notes:'Notes',name:'Name',desc:'Description',delete:'Delete',welcome:'Hello! I am your agentic assistant. How can I help?',placeholder:'Send a message...',noProj:'No projects yet. Use "Scan Workspace" or add manually.',noLogs:'No logs recorded yet.',saved:'Saved!',deleted:'Deleted!',added:'Project added!',scanned:' projects found!',confirmDel:'Delete project '},
+  'pt-BR':{chat:'Chat',projects:'Projetos',settings:'Configurações',logs:'Logs de Tools',status:'Status do Sistema',save:'Salvar',refresh:'Atualizar',scan:'🔍 Escanear Workspace',newProj:'+ Novo Projeto',addProj:'Adicionar Projeto',add:'Adicionar',overview:'Visão Geral',notes:'Notas',name:'Nome',desc:'Descrição',delete:'Excluir',welcome:'Olá! Sou seu assistente agêntico. Como posso ajudar?',placeholder:'Envie uma mensagem...',noProj:'Nenhum projeto. Use "Escanear Workspace" ou adicione manualmente.',noLogs:'Nenhum log registrado.',saved:'Salvo!',deleted:'Excluído!',added:'Projeto adicionado!',scanned:' projetos encontrados!',confirmDel:'Excluir projeto '},
+  es:{chat:'Chat',projects:'Proyectos',settings:'Configuración',logs:'Registros',status:'Estado del Sistema',save:'Guardar',refresh:'Actualizar',scan:'🔍 Escanear',newProj:'+ Nuevo',addProj:'Agregar Proyecto',add:'Agregar',overview:'General',notes:'Notas',name:'Nombre',desc:'Descripción',delete:'Eliminar',welcome:'¡Hola! Soy tu asistente agéntico. ¿Cómo puedo ayudar?',placeholder:'Envía un mensaje...',noProj:'Sin proyectos. Escanea o agrega manualmente.',noLogs:'Sin registros.',saved:'¡Guardado!',deleted:'¡Eliminado!',added:'¡Proyecto agregado!',scanned:' proyectos encontrados!',confirmDel:'Eliminar proyecto '}
+};
+
+function t(key){const lang=i18n[appCfg.language]||i18n.en;return lang[key]||i18n.en[key]||key}
+
+function applyI18n(){
+  document.getElementById('chatTitle').textContent=appCfg.agent_name+' — '+t('chat');
+  document.getElementById('projTitle').textContent=t('projects');
+  document.getElementById('setTitle').textContent=t('settings');
+  document.getElementById('logTitle').textContent=t('logs');
+  document.getElementById('statTitle').textContent=t('status');
+  document.getElementById('btnSave').textContent=t('save');
+  document.getElementById('btnScan').textContent=t('scan');
+  document.getElementById('btnNewProj').textContent=t('newProj');
+  document.getElementById('btnRefreshLogs').textContent=t('refresh');
+  document.getElementById('btnRefreshStatus').textContent=t('refresh');
+  document.getElementById('tabOverview').textContent=t('overview');
+  document.getElementById('tabNotes').textContent=t('notes');
+  document.getElementById('btnSaveProj').textContent=t('save');
+  document.getElementById('btnDelProj').textContent=t('delete');
+  document.getElementById('addTitle').textContent=t('addProj');
+  document.getElementById('btnAddProj').textContent=t('add');
+  document.getElementById('chatInput').placeholder=t('placeholder');
+  document.getElementById('logoLetter').textContent=appCfg.agent_name.charAt(0).toUpperCase();
+  document.title=appCfg.agent_name+' — Agent Runtime';
+}
+
+async function loadAppConfig(){
+  try{const r=await fetch('/api/app-config');appCfg=await r.json();applyI18n()}catch(e){}
+}
+
 function showPage(n,btn){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('page-'+n).classList.add('active');btn.classList.add('active');if(n==='logs')loadLogs();if(n==='status')loadStatus();if(n==='settings')loadSettings();if(n==='projects')loadProjects()}
-function toast(m,t='ok'){const d=document.createElement('div');d.className='toast toast-'+t;d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3000)}
+function toast(m,type='ok'){const d=document.createElement('div');d.className='toast toast-'+type;d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3000)}
 
-// Chat
-async function sendMsg(){const i=document.getElementById('chatInput'),t=i.value.trim();if(!t)return;appendMsg('user',t);i.value='';i.style.height='52px';const b=document.getElementById('sendBtn');b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:'web-default',message:t})});const d=await r.json();appendMsg('assistant',d.reply)}catch(e){appendMsg('assistant','Erro: '+e.message)}b.disabled=false;b.innerHTML='➤'}
-function appendMsg(r,t){const c=document.getElementById('messages'),d=document.createElement('div');d.className='msg msg-'+r;const tm=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});d.innerHTML=esc(t)+'<div class="msg-time">'+tm+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
+async function sendMsg(){const i=document.getElementById('chatInput'),txt=i.value.trim();if(!txt)return;appendMsg('user',txt);i.value='';i.style.height='52px';const b=document.getElementById('sendBtn');b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:'web-default',message:txt})});const d=await r.json();appendMsg('assistant',d.reply)}catch(e){appendMsg('assistant','Error: '+e.message)}b.disabled=false;b.innerHTML='➤'}
+function appendMsg(r,txt){const c=document.getElementById('messages'),d=document.createElement('div');d.className='msg msg-'+r;const tm=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});d.innerHTML=esc(txt)+'<div class="msg-time">'+tm+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
 
-// Settings
-async function loadSettings(){try{const r=await fetch('/api/settings'),d=await r.json();['zai_endpoint','zai_api_key','model','telegram_token','telegram_allow_id','workspace_root','max_history','max_turns','github_token','github_username'].forEach(f=>{const e=document.getElementById('set-'+f);if(e&&d[f])e.value=d[f]})}catch(e){}}
-async function saveSettings(){const s={};['zai_endpoint','zai_api_key','model','telegram_token','telegram_allow_id','workspace_root','max_history','max_turns','github_token','github_username'].forEach(f=>{const e=document.getElementById('set-'+f);if(e&&e.value)s[f]=e.value});try{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)});toast('Salvo!')}catch(e){toast('Erro: '+e.message,'err')}}
+async function loadSettings(){try{const r=await fetch('/api/settings'),d=await r.json();['zai_endpoint','zai_api_key','model','telegram_token','telegram_allow_id','workspace_root','max_history','max_turns','github_token','github_username','agent_name','language'].forEach(f=>{const e=document.getElementById('set-'+f);if(e&&d[f]){if(e.tagName==='SELECT')e.value=d[f];else e.value=d[f]}})}catch(e){}}
+async function saveSettings(){const s={};['zai_endpoint','zai_api_key','model','telegram_token','telegram_allow_id','workspace_root','max_history','max_turns','github_token','github_username','agent_name','language'].forEach(f=>{const e=document.getElementById('set-'+f);if(e&&e.value)s[f]=e.value});try{await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)});if(s.agent_name)appCfg.agent_name=s.agent_name;if(s.language)appCfg.language=s.language;applyI18n();toast(t('saved'))}catch(e){toast('Error: '+e.message,'err')}}
 
-// Logs
-async function loadLogs(){try{const r=await fetch('/api/logs'),l=await r.json(),c=document.getElementById('logsC');if(!l||!l.length){c.innerHTML='<p style="color:var(--t3);text-align:center;padding:40px">Nenhum log.</p>';return}c.innerHTML=l.map(x=>'<div class="log-e" onclick="this.classList.toggle(\'exp\')"><div class="log-h"><span class="log-tool">'+escPre(x.tool_name)+'</span><span class="log-s log-'+(x.status==='OK'?'ok':'err')+'">'+x.status+'</span><span class="log-t">'+x.created_at+'</span></div><div class="log-d">INPUT:\n'+escPre((x.input||'').substring(0,300))+'\n\nOUTPUT:\n'+escPre((x.output||'').substring(0,500))+'</div></div>').join('')}catch(e){}}
+async function loadLogs(){try{const r=await fetch('/api/logs'),l=await r.json(),c=document.getElementById('logsC');if(!l||!l.length){c.innerHTML='<p style="color:var(--t3);text-align:center;padding:40px">'+t('noLogs')+'</p>';return}c.innerHTML=l.map(x=>'<div class="log-e" onclick="this.classList.toggle(\'exp\')"><div class="log-h"><span class="log-tool">'+escPre(x.tool_name)+'</span><span class="log-s log-'+(x.status==='OK'?'ok':'err')+'">'+x.status+'</span><span class="log-t">'+x.created_at+'</span></div><div class="log-d">INPUT:\n'+escPre((x.input||'').substring(0,300))+'\n\nOUTPUT:\n'+escPre((x.output||'').substring(0,500))+'</div></div>').join('')}catch(e){}}
 
-// Status
-async function loadStatus(){try{const r=await fetch('/api/status'),s=await r.json(),db=s.db_stats||{},u=Math.floor(s.uptime_seconds/3600)+'h '+Math.floor(s.uptime_seconds%3600/60)+'m';document.getElementById('statusC').innerHTML='<div class="st-grid">'+[['Hostname',s.hostname,s.os_arch],['Uptime',u,'Go '+s.go_version],['Memoria',(s.mem_alloc_mb||0).toFixed(1)+' MB',(s.mem_sys_mb||0).toFixed(1)+' MB sys'],['Goroutines',s.goroutines,''],['Mensagens',db.total_messages||0,(db.total_sessions||0)+' sessoes'],['Execucoes',db.total_tool_executions||0,(db.successful_executions||0)+' OK'],['Projetos',db.total_projects||0,'']].map(x=>'<div class="st-c"><div class="st-l">'+x[0]+'</div><div class="st-v">'+x[1]+'</div><div class="st-s">'+x[2]+'</div></div>').join('')+'</div>'}catch(e){}}
+async function loadStatus(){try{const r=await fetch('/api/status'),s=await r.json(),db=s.db_stats||{},u=Math.floor(s.uptime_seconds/3600)+'h '+Math.floor(s.uptime_seconds%3600/60)+'m';document.getElementById('statusC').innerHTML='<div class="st-grid">'+[['Hostname',s.hostname,s.os_arch],['Uptime',u,'Go '+s.go_version],['Memory',(s.mem_alloc_mb||0).toFixed(1)+' MB',(s.mem_sys_mb||0).toFixed(1)+' MB sys'],['Goroutines',s.goroutines,''],['Messages',db.total_messages||0,(db.total_sessions||0)+' sessions'],['Executions',db.total_tool_executions||0,(db.successful_executions||0)+' OK'],['Projects',db.total_projects||0,'']].map(x=>'<div class="st-c"><div class="st-l">'+x[0]+'</div><div class="st-v">'+x[1]+'</div><div class="st-s">'+x[2]+'</div></div>').join('')+'</div>'}catch(e){}}
 
-// Projects
-async function loadProjects(){try{const r=await fetch('/api/projects'),p=await r.json(),c=document.getElementById('projGrid');if(!p||!p.length){c.innerHTML='<p style="color:var(--t3);text-align:center;padding:40px;grid-column:1/-1">Nenhum projeto. Use "Scan Workspace" ou adicione manualmente.</p>';return}c.innerHTML=p.map(x=>{const st=x.status||'active';const techs=(x.tech_stack||'').split(', ').filter(Boolean).map(t=>'<span class="proj-tech">'+t+'</span>').join('');const br=x.git_remote?'<span class="proj-branch">'+escPre(x.git_remote)+'</span>':'';return'<div class="proj-card" onclick="openProject('+x.id+')"><div class="proj-name">'+esc(x.name)+'</div><div class="proj-path">'+escPre(x.path)+'</div><div class="proj-meta">'+techs+br+'<span class="badge badge-'+st+'">'+st+'</span></div>'+(x.description?'<div style="font-size:13px;color:var(--t2)">'+esc(x.description)+'</div>':'')+'</div>'}).join('')}catch(e){document.getElementById('projGrid').innerHTML='<p style="color:var(--err)">Erro: '+e.message+'</p>'}}
+async function loadProjects(){try{const r=await fetch('/api/projects'),p=await r.json(),c=document.getElementById('projGrid');if(!p||!p.length){c.innerHTML='<p style="color:var(--t3);text-align:center;padding:40px;grid-column:1/-1">'+t('noProj')+'</p>';return}c.innerHTML=p.map(x=>{const st=x.status||'active';const techs=(x.tech_stack||'').split(', ').filter(Boolean).map(t=>'<span class="proj-tech">'+t+'</span>').join('');const br=x.git_remote?'<span class="proj-branch">'+escPre(x.git_remote)+'</span>':'';return'<div class="proj-card" onclick="openProject('+x.id+')"><div class="proj-name">'+esc(x.name)+'</div><div class="proj-path">'+escPre(x.path)+'</div><div class="proj-meta">'+techs+br+'<span class="badge badge-'+st+'">'+st+'</span></div>'+(x.description?'<div style="font-size:13px;color:var(--t2)">'+esc(x.description)+'</div>':'')+'</div>'}).join('')}catch(e){}}
 
-async function scanProjects(){toast('Escaneando workspace...');try{const r=await fetch('/api/projects/scan'),d=await r.json();toast(d.scanned+' projetos encontrados!');loadProjects()}catch(e){toast('Erro: '+e.message,'err')}}
-
+async function scanProjects(){toast('Scanning...');try{const r=await fetch('/api/projects/scan'),d=await r.json();toast(d.scanned+t('scanned'));loadProjects()}catch(e){toast('Error','err')}}
 function showAddProject(){document.getElementById('addModal').classList.add('show')}
 function closeAddModal(){document.getElementById('addModal').classList.remove('show')}
-async function addProject(){const n=document.getElementById('add-name').value,p=document.getElementById('add-path').value;if(!n||!p){toast('Nome e caminho obrigatorios','err');return}try{await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,path:p,description:document.getElementById('add-desc').value,tech_stack:document.getElementById('add-tech').value})});closeAddModal();loadProjects();toast('Projeto adicionado!')}catch(e){toast('Erro','err')}}
+async function addProject(){const n=document.getElementById('add-name').value,p=document.getElementById('add-path').value;if(!n||!p){toast('Name and path required','err');return}try{await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,path:p,description:document.getElementById('add-desc').value,tech_stack:document.getElementById('add-tech').value})});closeAddModal();loadProjects();toast(t('added'))}catch(e){toast('Error','err')}}
 
 async function openProject(id){try{const r=await fetch('/api/projects'),ps=await r.json(),p=ps.find(x=>x.id===id);if(!p)return;currentProj=p;document.getElementById('modalTitle').textContent=p.name;document.getElementById('proj-name').value=p.name;document.getElementById('proj-desc').value=p.description||'';document.getElementById('proj-status').value=p.status||'active';document.getElementById('proj-notes').value=p.notes||'';document.getElementById('projModal').classList.add('show');showTab('overview',document.querySelector('.modal-tab'));loadGitInfo(id)}catch(e){}}
-
 function closeModal(){document.getElementById('projModal').classList.remove('show');currentProj=null}
 function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.modal-tab').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active')}
 
-async function saveProject(){if(!currentProj)return;try{await fetch('/api/projects',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentProj.id,name:document.getElementById('proj-name').value,description:document.getElementById('proj-desc').value,status:document.getElementById('proj-status').value,notes:document.getElementById('proj-notes').value})});toast('Projeto salvo!');loadProjects()}catch(e){toast('Erro','err')}}
+async function saveProject(){if(!currentProj)return;try{await fetch('/api/projects',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentProj.id,name:document.getElementById('proj-name').value,description:document.getElementById('proj-desc').value,status:document.getElementById('proj-status').value,notes:document.getElementById('proj-notes').value})});toast(t('saved'));loadProjects()}catch(e){toast('Error','err')}}
+async function deleteProject(){if(!currentProj||!confirm(t('confirmDel')+currentProj.name+'?'))return;try{await fetch('/api/projects',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentProj.id})});closeModal();loadProjects();toast(t('deleted'))}catch(e){toast('Error','err')}}
 
-async function deleteProject(){if(!currentProj||!confirm('Excluir projeto '+currentProj.name+'?'))return;try{await fetch('/api/projects',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentProj.id})});closeModal();loadProjects();toast('Projeto excluido!')}catch(e){toast('Erro','err')}}
-
-async function loadGitInfo(id){try{const r=await fetch('/api/projects/git?id='+id),d=await r.json();document.getElementById('git-branch').textContent=d.branch||'(sem git)';document.getElementById('git-branches').textContent=d.branches||'-';document.getElementById('git-status').textContent=d.status||'Clean';document.getElementById('git-log').textContent=d.log||'-';document.getElementById('git-remote').textContent=d.remote||'(sem remote)'}catch(e){}}
-
-async function gitAction(action){if(!currentProj)return;const body={id:currentProj.id,action:action};if(action==='commit')body.message=document.getElementById('git-commit-msg').value;if(action==='new_branch'||action==='checkout')body.branch=document.getElementById('git-branch-name').value;if((action==='new_branch'||action==='checkout')&&!body.branch){toast('Nome da branch obrigatorio','err');return}try{const r=await fetch('/api/projects/git/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();toast(action+': OK');loadGitInfo(currentProj.id);if(d.output)document.getElementById('git-status').textContent=d.output}catch(e){toast('Git error: '+e.message,'err')}}
+async function loadGitInfo(id){try{const r=await fetch('/api/projects/git?id='+id),d=await r.json();document.getElementById('git-branch').textContent=d.branch||'(no git)';document.getElementById('git-branches').textContent=d.branches||'-';document.getElementById('git-status').textContent=d.status||'Clean';document.getElementById('git-log').textContent=d.log||'-';document.getElementById('git-remote').textContent=d.remote||'(no remote)'}catch(e){}}
+async function gitAction(action){if(!currentProj)return;const body={id:currentProj.id,action};if(action==='commit')body.message=document.getElementById('git-commit-msg').value;if(action==='new_branch'||action==='checkout')body.branch=document.getElementById('git-branch-name').value;if((action==='new_branch'||action==='checkout')&&!body.branch){toast('Branch name required','err');return}try{const r=await fetch('/api/projects/git/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();toast(action+': OK');loadGitInfo(currentProj.id);if(d.output)document.getElementById('git-status').textContent=d.output}catch(e){toast('Git error: '+e.message,'err')}}
 
 document.getElementById('chatInput').addEventListener('input',function(){this.style.height='52px';this.style.height=Math.min(this.scrollHeight,120)+'px'});
-appendMsg('assistant','Ola! Eu sou o Cronos, seu assistente agentico. Como posso ajudar?');
+
+// Init
+loadAppConfig().then(()=>{appendMsg('assistant',t('welcome'))});
 </script>
 </body></html>`
 }

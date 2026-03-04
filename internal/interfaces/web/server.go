@@ -20,12 +20,17 @@ import (
 type Server struct {
 	rt    *rt.Runtime
 	store *storage.Storage
+	cfg   map[string]string
 	port  string
 	start time.Time
 }
 
 func NewServer(runtime *rt.Runtime, store *storage.Storage, port string) *Server {
 	return &Server{rt: runtime, store: store, port: port, start: time.Now()}
+}
+
+func (s *Server) SetConfig(agentName, language string) {
+	s.cfg = map[string]string{"agent_name": agentName, "language": language, "version": "1.0.0"}
 }
 
 func (s *Server) Start() error {
@@ -38,8 +43,17 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/projects/scan", s.handleProjectScan)
 	http.HandleFunc("/api/projects/git", s.handleProjectGit)
 	http.HandleFunc("/api/projects/git/action", s.handleProjectGitAction)
+	http.HandleFunc("/api/app-config", s.handleAppConfig)
 	fmt.Printf("Web server listening on http://0.0.0.0:%s\n", s.port)
 	return http.ListenAndServe(":"+s.port, nil)
+}
+
+func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.cfg == nil {
+		s.cfg = map[string]string{"agent_name": "Agent", "language": "en", "version": "1.0.0"}
+	}
+	json.NewEncoder(w).Encode(s.cfg)
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +113,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"workspace_root": os.Getenv("WORKSPACE_ROOT"),
 			"model": "glm-5", "max_history": "25", "max_turns": "50",
 			"github_token": "", "github_username": "",
+			"agent_name": os.Getenv("AGENT_NAME"), "language": os.Getenv("LANGUAGE"),
 		}
+		if defaults["agent_name"] == "" { defaults["agent_name"] = "Cronos" }
+		if defaults["language"] == "" { defaults["language"] = "en" }
 		for k, v := range defaults {
 			if _, exists := settings[k]; !exists {
 				settings[k] = v
@@ -223,7 +240,7 @@ func (s *Server) handleProjectGitAction(w http.ResponseWriter, r *http.Request) 
 	case "commit":
 		msg := req.Message
 		if msg == "" {
-			msg = "Update from Cronos"
+			msg = "Auto-commit from agent"
 		}
 		runGit(proj.Path, "add", "-A")
 		output = runGit(proj.Path, "commit", "-m", msg)

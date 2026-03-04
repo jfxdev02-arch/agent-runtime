@@ -79,16 +79,16 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 	// Handle pending confirmation for high-risk tools
 	if s.AwaitingConfirmation {
 		msg := strings.ToUpper(strings.TrimSpace(userMessage))
-		if msg == "SIM" {
+		if msg == "YES" || msg == "SIM" || msg == "Y" {
 			s.AwaitingConfirmation = false
 			return r.executeApprovedToolCalls(s)
-		} else if msg == "NAO" || msg == "NÃO" {
+		} else if msg == "NO" || msg == "NAO" || msg == "N" {
 			s.AwaitingConfirmation = false
 			s.PendingToolCalls = nil
 			s.PendingAssistantMsg = nil
-			return "Execucao cancelada.", false
+			return "Execution cancelled.", false
 		}
-		return "Acao pendente de alto risco. Responda SIM ou NAO.", true
+		return "Pending high-risk action. Reply YES or NO.", true
 	}
 
 	// Add user message to history
@@ -120,7 +120,7 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 // agenticLoop calls the LLM, handles tool calls, feeds results back, repeats
 func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int) (string, bool) {
 	if depth >= r.cfg.MaxTurns {
-		summary := fmt.Sprintf("Atingi o limite de %d turnos. Tudo que foi executado ate aqui esta salvo.", r.cfg.MaxTurns)
+		summary := fmt.Sprintf("Turn limit (%d) reached. All executed actions have been saved.", r.cfg.MaxTurns)
 		s.History = append(s.History, planner.Message{Role: "assistant", Content: summary})
 		r.store.LogMessage(s.ID, "assistant", summary)
 		return summary, false
@@ -128,7 +128,7 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int)
 
 	resp, err := r.llm.Call(messages, r.toolDefs)
 	if err != nil {
-		return fmt.Sprintf("Erro na chamada LLM: %v", err), false
+		return fmt.Sprintf("LLM error: %v", err), false
 	}
 
 	// No tool calls: LLM gave a direct text response
@@ -152,11 +152,11 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int)
 			s.AwaitingConfirmation = true
 
 			var desc strings.Builder
-			desc.WriteString("O agente quer executar acoes de alto risco:\n\n")
+			desc.WriteString("High-risk actions requested:\n\n")
 			for _, tc2 := range resp.ToolCalls {
 				desc.WriteString(fmt.Sprintf("⚠ Tool: %s\nArgs: %s\n\n", tc2.Function.Name, tc2.Function.Arguments))
 			}
-			desc.WriteString("Confirma executar? SIM / NAO")
+			desc.WriteString("Confirm execution? YES / NO")
 			return desc.String(), true
 		}
 	}
@@ -165,10 +165,10 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int)
 	return r.executeToolCalls(s, messages, resp, depth)
 }
 
-// executeApprovedToolCalls runs after user confirms "SIM"
+// executeApprovedToolCalls runs after user confirms
 func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
 	if s.PendingToolCalls == nil || s.PendingAssistantMsg == nil {
-		return "Nenhuma acao pendente.", false
+		return "No pending action.", false
 	}
 
 	// Rebuild messages context

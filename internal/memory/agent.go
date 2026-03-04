@@ -48,17 +48,17 @@ func (m *MemoryAgent) RetrieveRelevantContext(userMessage string, olderMsgs []st
 		digest.WriteString(fmt.Sprintf("[%d] (%s) %s: %s\n", i+1, msg.CreatedAt, msg.Role, preview))
 	}
 
-	systemPrompt := `You are a memory retrieval agent. Your job is to analyze past conversation messages and select ONLY the ones that are relevant to the user's current question/task.
+	systemPrompt := `You are a memory retrieval agent. Analyze past conversation messages and select ONLY those relevant to the user's current question/task.
 
 Rules:
 1. Read the list of older messages provided.
-2. Given the user's CURRENT message, identify which past messages contain useful context.
-3. Return a SHORT summary (max 300 words) of the relevant context found. 
-4. If nothing is relevant, respond with exactly: NENHUM_CONTEXTO_RELEVANTE
-5. Respond in Portuguese (Brazil).
+2. Identify which past messages contain useful context for the current message.
+3. Return a SHORT summary (max 300 words) of the relevant context found.
+4. If nothing is relevant, respond with exactly: NO_RELEVANT_CONTEXT
+5. Respond in the same language as the user's current message.
 6. Do NOT invent information. Only summarize what exists in the messages.`
 
-	userPrompt := fmt.Sprintf("Mensagem atual do usuario:\n\"%s\"\n\nMensagens anteriores do banco de dados:\n%s\n\nResuma apenas o contexto relevante para a mensagem atual:", userMessage, digest.String())
+	userPrompt := fmt.Sprintf("Current user message:\n\"%s\"\n\nOlder messages from database:\n%s\n\nSummarize only the relevant context for the current message:", userMessage, digest.String())
 
 	reqBody := chatRequest{
 		Model: "glm-5",
@@ -113,7 +113,7 @@ Rules:
 	}
 
 	result := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	if result == "NENHUM_CONTEXTO_RELEVANTE" {
+	if result == "NO_RELEVANT_CONTEXT" {
 		return "", nil
 	}
 	return result, nil

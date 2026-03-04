@@ -32,6 +32,7 @@ func main() {
 	go bot.Start()
 
 	srv := web.NewServer(rt, store, cfg.Port)
+	srv.SetConfig(cfg.AgentName, cfg.Language)
 	if err := srv.Start(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
