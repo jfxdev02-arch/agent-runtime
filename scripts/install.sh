@@ -40,8 +40,10 @@ fi
 echo "[2/4] Building..."
 cd "$PROJECT_DIR"
 go mod tidy 2>/dev/null || true
-go build -ldflags="-w -s" -o "$BINARY_NAME" cmd/agent/main.go
-echo "  Built $PROJECT_DIR/$BINARY_NAME"
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
+LDFLAGS="-w -s -X github.com/dev/agent-runtime/internal/updater.Version=$VERSION"
+go build -ldflags="$LDFLAGS" -o "$BINARY_NAME" cmd/agent/main.go
+echo "  Built $PROJECT_DIR/$BINARY_NAME ($VERSION)"
 
 # --- Step 3: Create systemd service ---
 echo "[3/4] Creating systemd service..."

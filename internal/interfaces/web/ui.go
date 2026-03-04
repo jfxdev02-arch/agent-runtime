@@ -143,6 +143,19 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
         <div class="card"><label>Max History</label><input type="number" id="set-max_history"></div>
         <div class="card"><label>Max Turns</label><input type="number" id="set-max_turns"></div>
       </div>
+      <div class="sec"><h2 id="secUpdate">System Update</h2>
+        <div class="card" style="position:relative">
+          <label id="lblCurrentVer">Current Version</label>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;margin-bottom:12px" id="currentVerDisplay">—</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="btnCheckUpdate" onclick="checkForUpdates()">🔍 <span id="btnCheckUpdateText">Check for Updates</span></button>
+            <button class="btn btn-primary" id="btnApplyUpdate" onclick="applyUpdate()" style="display:none">⬇ <span id="btnApplyUpdateText">Update Now</span></button>
+          </div>
+          <div id="updateResult" style="margin-top:12px;display:none">
+            <div id="updateInfo" class="git-pre" style="margin-bottom:8px"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div id="page-logs" class="page">
@@ -215,9 +228,9 @@ const escPre=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,
 
 // i18n
 const i18n={
-  en:{chat:'Chat',projects:'Projects',settings:'Settings',logs:'Tool Logs',status:'System Status',save:'Save',refresh:'Refresh',scan:'🔍 Scan Workspace',newProj:'+ New Project',addProj:'Add Project',add:'Add',overview:'Overview',notes:'Notes',name:'Name',desc:'Description',delete:'Delete',welcome:'Hello! I am your agentic assistant. How can I help?',placeholder:'Send a message...',noProj:'No projects yet. Use "Scan Workspace" or add manually.',noLogs:'No logs recorded yet.',saved:'Saved!',deleted:'Deleted!',added:'Project added!',scanned:' projects found!',confirmDel:'Delete project '},
-  'pt-BR':{chat:'Chat',projects:'Projetos',settings:'Configurações',logs:'Logs de Tools',status:'Status do Sistema',save:'Salvar',refresh:'Atualizar',scan:'🔍 Escanear Workspace',newProj:'+ Novo Projeto',addProj:'Adicionar Projeto',add:'Adicionar',overview:'Visão Geral',notes:'Notas',name:'Nome',desc:'Descrição',delete:'Excluir',welcome:'Olá! Sou seu assistente agêntico. Como posso ajudar?',placeholder:'Envie uma mensagem...',noProj:'Nenhum projeto. Use "Escanear Workspace" ou adicione manualmente.',noLogs:'Nenhum log registrado.',saved:'Salvo!',deleted:'Excluído!',added:'Projeto adicionado!',scanned:' projetos encontrados!',confirmDel:'Excluir projeto '},
-  es:{chat:'Chat',projects:'Proyectos',settings:'Configuración',logs:'Registros',status:'Estado del Sistema',save:'Guardar',refresh:'Actualizar',scan:'🔍 Escanear',newProj:'+ Nuevo',addProj:'Agregar Proyecto',add:'Agregar',overview:'General',notes:'Notas',name:'Nombre',desc:'Descripción',delete:'Eliminar',welcome:'¡Hola! Soy tu asistente agéntico. ¿Cómo puedo ayudar?',placeholder:'Envía un mensaje...',noProj:'Sin proyectos. Escanea o agrega manualmente.',noLogs:'Sin registros.',saved:'¡Guardado!',deleted:'¡Eliminado!',added:'¡Proyecto agregado!',scanned:' proyectos encontrados!',confirmDel:'Eliminar proyecto '}
+  en:{chat:'Chat',projects:'Projects',settings:'Settings',logs:'Tool Logs',status:'System Status',save:'Save',refresh:'Refresh',scan:'🔍 Scan Workspace',newProj:'+ New Project',addProj:'Add Project',add:'Add',overview:'Overview',notes:'Notes',name:'Name',desc:'Description',delete:'Delete',welcome:'Hello! I am your agentic assistant. How can I help?',placeholder:'Send a message...',noProj:'No projects yet. Use "Scan Workspace" or add manually.',noLogs:'No logs recorded yet.',saved:'Saved!',deleted:'Deleted!',added:'Project added!',scanned:' projects found!',confirmDel:'Delete project ',sysUpdate:'System Update',currentVer:'Current Version',checkUpdate:'Check for Updates',applyUpdate:'Update Now',upToDate:'✅ You are up to date!',updateAvail:'🆕 New version available: ',updating:'Updating... please wait...',updateOk:'✅ Update applied! Restarting...',updateFail:'❌ Update failed',noRelease:'No release notes',relNotes:'Release Notes'},
+  'pt-BR':{chat:'Chat',projects:'Projetos',settings:'Configurações',logs:'Logs de Tools',status:'Status do Sistema',save:'Salvar',refresh:'Atualizar',scan:'🔍 Escanear Workspace',newProj:'+ Novo Projeto',addProj:'Adicionar Projeto',add:'Adicionar',overview:'Visão Geral',notes:'Notas',name:'Nome',desc:'Descrição',delete:'Excluir',welcome:'Olá! Sou seu assistente agêntico. Como posso ajudar?',placeholder:'Envie uma mensagem...',noProj:'Nenhum projeto. Use "Escanear Workspace" ou adicione manualmente.',noLogs:'Nenhum log registrado.',saved:'Salvo!',deleted:'Excluído!',added:'Projeto adicionado!',scanned:' projetos encontrados!',confirmDel:'Excluir projeto ',sysUpdate:'Atualização do Sistema',currentVer:'Versão Atual',checkUpdate:'Buscar Atualizações',applyUpdate:'Atualizar Agora',upToDate:'✅ Você está atualizado!',updateAvail:'🆕 Nova versão disponível: ',updating:'Atualizando... aguarde...',updateOk:'✅ Atualização aplicada! Reiniciando...',updateFail:'❌ Falha na atualização',noRelease:'Sem notas de versão',relNotes:'Notas da Versão'},
+  es:{chat:'Chat',projects:'Proyectos',settings:'Configuración',logs:'Registros',status:'Estado del Sistema',save:'Guardar',refresh:'Actualizar',scan:'🔍 Escanear',newProj:'+ Nuevo',addProj:'Agregar Proyecto',add:'Agregar',overview:'General',notes:'Notas',name:'Nombre',desc:'Descripción',delete:'Eliminar',welcome:'¡Hola! Soy tu asistente agéntico. ¿Cómo puedo ayudar?',placeholder:'Envía un mensaje...',noProj:'Sin proyectos. Escanea o agrega manualmente.',noLogs:'Sin registros.',saved:'¡Guardado!',deleted:'¡Eliminado!',added:'¡Proyecto agregado!',scanned:' proyectos encontrados!',confirmDel:'Eliminar proyecto ',sysUpdate:'Actualización del Sistema',currentVer:'Versión Actual',checkUpdate:'Buscar Actualizaciones',applyUpdate:'Actualizar Ahora',upToDate:'✅ ¡Estás al día!',updateAvail:'🆕 Nueva versión disponible: ',updating:'Actualizando... espere...',updateOk:'✅ ¡Actualización aplicada! Reiniciando...',updateFail:'❌ Error en la actualización',noRelease:'Sin notas de versión',relNotes:'Notas de Versión'}
 };
 
 function t(key){const lang=i18n[appCfg.language]||i18n.en;return lang[key]||i18n.en[key]||key}
@@ -242,6 +255,11 @@ function applyI18n(){
   document.getElementById('chatInput').placeholder=t('placeholder');
   document.getElementById('logoLetter').textContent=appCfg.agent_name.charAt(0).toUpperCase();
   document.title=appCfg.agent_name+' — Agent Runtime';
+  document.getElementById('secUpdate').textContent=t('sysUpdate');
+  document.getElementById('lblCurrentVer').textContent=t('currentVer');
+  document.getElementById('btnCheckUpdateText').textContent=t('checkUpdate');
+  document.getElementById('btnApplyUpdateText').textContent=t('applyUpdate');
+  document.getElementById('currentVerDisplay').textContent=appCfg.version||'—';
 }
 
 async function loadAppConfig(){
@@ -277,6 +295,63 @@ async function deleteProject(){if(!currentProj||!confirm(t('confirmDel')+current
 
 async function loadGitInfo(id){try{const r=await fetch('/api/projects/git?id='+id),d=await r.json();document.getElementById('git-branch').textContent=d.branch||'(no git)';document.getElementById('git-branches').textContent=d.branches||'-';document.getElementById('git-status').textContent=d.status||'Clean';document.getElementById('git-log').textContent=d.log||'-';document.getElementById('git-remote').textContent=d.remote||'(no remote)'}catch(e){}}
 async function gitAction(action){if(!currentProj)return;const body={id:currentProj.id,action};if(action==='commit')body.message=document.getElementById('git-commit-msg').value;if(action==='new_branch'||action==='checkout')body.branch=document.getElementById('git-branch-name').value;if((action==='new_branch'||action==='checkout')&&!body.branch){toast('Branch name required','err');return}try{const r=await fetch('/api/projects/git/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();toast(action+': OK');loadGitInfo(currentProj.id);if(d.output)document.getElementById('git-status').textContent=d.output}catch(e){toast('Git error: '+e.message,'err')}}
+
+// --- Update System ---
+let pendingUpdateInfo=null;
+async function checkForUpdates(){
+  const btn=document.getElementById('btnCheckUpdate');
+  const origHTML=btn.innerHTML;
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> '+t('checkUpdate');
+  const res=document.getElementById('updateResult');
+  const info=document.getElementById('updateInfo');
+  try{
+    const r=await fetch('/api/update/check');
+    const d=await r.json();
+    if(d.error){res.style.display='block';info.textContent='Error: '+d.error;info.style.borderColor='var(--err)';toast(d.error,'err');return}
+    res.style.display='block';
+    document.getElementById('currentVerDisplay').textContent=d.current_version;
+    if(d.update_available){
+      pendingUpdateInfo=d;
+      info.innerHTML=t('updateAvail')+'<strong style="color:var(--ok)">'+escPre(d.latest_version)+'</strong>';
+      if(d.release_notes){info.innerHTML+='\n\n<strong>'+t('relNotes')+':</strong>\n'+escPre(d.release_notes)}
+      if(d.published_at){info.innerHTML+='\n\n📅 '+d.published_at.substring(0,10)}
+      info.style.borderColor='var(--ok)';
+      document.getElementById('btnApplyUpdate').style.display='inline-flex';
+      toast(t('updateAvail')+d.latest_version)
+    }else{
+      pendingUpdateInfo=null;
+      info.textContent=t('upToDate')+'\n'+t('currentVer')+': '+d.current_version;
+      info.style.borderColor='var(--ok)';
+      document.getElementById('btnApplyUpdate').style.display='none';
+      toast(t('upToDate'))
+    }
+  }catch(e){res.style.display='block';info.textContent='Error: '+e.message;info.style.borderColor='var(--err)';toast('Error: '+e.message,'err')}
+  finally{btn.disabled=false;btn.innerHTML=origHTML}
+}
+async function applyUpdate(){
+  if(!confirm(t('applyUpdate')+'?'))return;
+  const btn=document.getElementById('btnApplyUpdate');
+  const info=document.getElementById('updateInfo');
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> '+t('updating');
+  info.textContent=t('updating');
+  info.style.borderColor='var(--warn)';
+  try{
+    const r=await fetch('/api/update/apply',{method:'POST'});
+    const d=await r.json();
+    if(d.success){
+      info.textContent=t('updateOk')+'\n\n'+d.message+'\n\n'+d.output;
+      info.style.borderColor='var(--ok)';
+      toast(t('updateOk'));
+      // Auto-reload after service restarts
+      setTimeout(()=>{location.reload()},8000)
+    }else{
+      info.textContent=t('updateFail')+'\n\n'+d.message+'\n\n'+(d.output||'');
+      info.style.borderColor='var(--err)';
+      toast(t('updateFail'),'err');
+      btn.disabled=false;btn.innerHTML='⬇ '+t('applyUpdate')
+    }
+  }catch(e){info.textContent='Connection lost — service may be restarting...';info.style.borderColor='var(--warn)';setTimeout(()=>{location.reload()},8000)}
+}
 
 document.getElementById('chatInput').addEventListener('input',function(){this.style.height='52px';this.style.height=Math.min(this.scrollHeight,120)+'px'});
 

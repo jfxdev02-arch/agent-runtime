@@ -1,12 +1,14 @@
 .PHONY: build install uninstall start stop restart status logs clean
 
 BINARY = agent-runtime
+VERSION = $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
+LDFLAGS = -w -s -X github.com/dev/agent-runtime/internal/updater.Version=$(VERSION)
 
-# Build the binary (optimized)
+# Build the binary (optimized, with version embedded)
 build:
 	go mod tidy
-	go build -ldflags="-w -s" -o $(BINARY) cmd/agent/main.go
-	@echo "✅ Built ./$(BINARY)"
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY) cmd/agent/main.go
+	@echo "✅ Built ./$(BINARY) ($(VERSION))"
 
 # Install as systemd service (creates .env, builds, enables)
 install:
@@ -41,8 +43,8 @@ logs:
 
 # Build for Raspberry Pi (ARM64) from another machine
 build-pi:
-	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o $(BINARY) cmd/agent/main.go
-	@echo "✅ Built ./$(BINARY) for linux/arm64"
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY) cmd/agent/main.go
+	@echo "✅ Built ./$(BINARY) for linux/arm64 ($(VERSION))"
 
 # Clean build artifacts
 clean:

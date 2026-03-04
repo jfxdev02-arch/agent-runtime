@@ -12,6 +12,10 @@ import (
 	"github.com/dev/agent-runtime/internal/runtime"
 )
 
+// typingInterval defines how often to resend the "typing" action.
+// Telegram's indicator expires after ~5 seconds, so we refresh every 4.
+const typingInterval = 4 * time.Second
+
 type Bot struct {
 	token    string
 	allowID  string
@@ -69,7 +73,10 @@ func (b *Bot) pollUpdates() {
 			if u.Message.Text == "/start" {
 				b.sendMessage(chatID, "Agentic Runtime Ready! Waiting for commands.")
 			} else if u.Message.Text != "" {
+				// Show "typing..." while the agent processes the message
+				done := b.startTypingLoop(chatID)
 				reply, _ := b.rt.ProcessMessage(chatID, u.Message.Text)
+				close(done) // stop the typing indicator
 				if len(reply) > 4000 {
 					reply = reply[:4000] + "\n...[TRUNCATED]"
 				}
@@ -84,4 +91,32 @@ func (b *Bot) sendMessage(chatID, text string) {
 	payload := map[string]string{"chat_id": chatID, "text": text}
 	body, _ := json.Marshal(payload)
 	http.Post(url, "application/json", bytes.NewBuffer(body))
+}
+
+// sendChatAction sends a chat action (e.g. "typing") to indicate activity.
+func (b *Bot) sendChatAction(chatID, action string) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendChatAction", b.token)
+	payload := map[string]string{"chat_id": chatID, "action": action}
+	body, _ := json.Marshal(payload)
+	http.Post(url, "application/json", bytes.NewBuffer(body))
+}
+
+// startTypingLoop sends the "typing" indicator immediately and then keeps
+// refreshing it every typingInterval until the returned channel is closed.
+func (b *Bot) startTypingLoop(chatID string) chan struct{} {
+	done := make(chan struct{})
+	b.sendChatAction(chatID, "typing")
+	go func() {
+		ticker := time.NewTicker(typingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				b.sendChatAction(chatID, "typing")
+			}
+		}
+	}()
+	return done
 }

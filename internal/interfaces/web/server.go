@@ -15,22 +15,24 @@ import (
 
 	rt "github.com/dev/agent-runtime/internal/runtime"
 	"github.com/dev/agent-runtime/internal/storage"
+	"github.com/dev/agent-runtime/internal/updater"
 )
 
 type Server struct {
-	rt    *rt.Runtime
-	store *storage.Storage
-	cfg   map[string]string
-	port  string
-	start time.Time
+	rt         *rt.Runtime
+	store      *storage.Storage
+	cfg        map[string]string
+	port       string
+	start      time.Time
+	projectDir string
 }
 
 func NewServer(runtime *rt.Runtime, store *storage.Storage, port string) *Server {
-	return &Server{rt: runtime, store: store, port: port, start: time.Now()}
+	return &Server{rt: runtime, store: store, port: port, start: time.Now(), projectDir: updater.GetProjectDir()}
 }
 
 func (s *Server) SetConfig(agentName, language string) {
-	s.cfg = map[string]string{"agent_name": agentName, "language": language, "version": "1.0.0"}
+	s.cfg = map[string]string{"agent_name": agentName, "language": language, "version": updater.Version}
 }
 
 func (s *Server) Start() error {
@@ -44,6 +46,8 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/projects/git", s.handleProjectGit)
 	http.HandleFunc("/api/projects/git/action", s.handleProjectGitAction)
 	http.HandleFunc("/api/app-config", s.handleAppConfig)
+	http.HandleFunc("/api/update/check", s.handleUpdateCheck)
+	http.HandleFunc("/api/update/apply", s.handleUpdateApply)
 	fmt.Printf("Web server listening on http://0.0.0.0:%s\n", s.port)
 	return http.ListenAndServe(":"+s.port, nil)
 }
@@ -51,7 +55,7 @@ func (s *Server) Start() error {
 func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if s.cfg == nil {
-		s.cfg = map[string]string{"agent_name": "Agent", "language": "en", "version": "1.0.0"}
+		s.cfg = map[string]string{"agent_name": "Agent", "language": "en", "version": updater.Version}
 	}
 	json.NewEncoder(w).Encode(s.cfg)
 }
@@ -106,17 +110,21 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			settings = make(map[string]string)
 		}
 		defaults := map[string]string{
-			"telegram_token": maskSecret(os.Getenv("TELEGRAM_TOKEN")),
+			"telegram_token":    maskSecret(os.Getenv("TELEGRAM_TOKEN")),
 			"telegram_allow_id": os.Getenv("TELEGRAM_ALLOW_ID"),
-			"zai_endpoint": os.Getenv("ZAI_ENDPOINT"),
-			"zai_api_key": maskSecret(os.Getenv("ZAI_API_KEY")),
-			"workspace_root": os.Getenv("WORKSPACE_ROOT"),
-			"model": "glm-5", "max_history": "25", "max_turns": "50",
+			"zai_endpoint":      os.Getenv("ZAI_ENDPOINT"),
+			"zai_api_key":       maskSecret(os.Getenv("ZAI_API_KEY")),
+			"workspace_root":    os.Getenv("WORKSPACE_ROOT"),
+			"model":             "glm-5", "max_history": "25", "max_turns": "50",
 			"github_token": "", "github_username": "",
 			"agent_name": os.Getenv("AGENT_NAME"), "language": os.Getenv("LANGUAGE"),
 		}
-		if defaults["agent_name"] == "" { defaults["agent_name"] = "Cronos" }
-		if defaults["language"] == "" { defaults["language"] = "en" }
+		if defaults["agent_name"] == "" {
+			defaults["agent_name"] = "Cronos"
+		}
+		if defaults["language"] == "" {
+			defaults["language"] = "en"
+		}
 		for k, v := range defaults {
 			if _, exists := settings[k]; !exists {
 				settings[k] = v
@@ -210,11 +218,11 @@ func (s *Server) handleProjectGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := map[string]interface{}{
-		"branch":   getGitInfo(proj.Path, "branch"),
-		"status":   getGitInfo(proj.Path, "status"),
-		"log":      getGitInfo(proj.Path, "log"),
-		"branches": getGitInfo(proj.Path, "branches"),
-		"remote":   getGitInfo(proj.Path, "remote"),
+		"branch":    getGitInfo(proj.Path, "branch"),
+		"status":    getGitInfo(proj.Path, "status"),
+		"log":       getGitInfo(proj.Path, "log"),
+		"branches":  getGitInfo(proj.Path, "branches"),
+		"remote":    getGitInfo(proj.Path, "remote"),
 		"diff_stat": getGitInfo(proj.Path, "diff_stat"),
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -259,6 +267,29 @@ func (s *Server) handleProjectGitAction(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"output": output})
+}
+
+// --- Update ---
+
+func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	info, err := updater.CheckForUpdates()
+	if err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(info)
+}
+
+func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	result := updater.ApplyUpdate(s.projectDir)
+	json.NewEncoder(w).Encode(result)
 }
 
 // --- Helpers ---
