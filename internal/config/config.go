@@ -16,6 +16,7 @@ type Config struct {
 	Port            string
 	MaxHistory      int
 	MaxTurns        int
+	MaxAgentDepth   int
 	AgentName       string
 	Language        string
 }
@@ -32,6 +33,7 @@ func LoadConfig() *Config {
 		Port:            getEnv("PORT", "8080"),
 		MaxHistory:      getEnvInt("MAX_HISTORY", 25),
 		MaxTurns:        getEnvInt("MAX_TURNS", 50),
+		MaxAgentDepth:   getEnvInt("MAX_AGENT_DEPTH", 3),
 		AgentName:       getEnv("AGENT_NAME", "Cronos"),
 		Language:        getEnv("LANGUAGE", "en"),
 	}

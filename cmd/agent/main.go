@@ -6,6 +6,8 @@ import (
 	"github.com/dev/agent-runtime/internal/config"
 	"github.com/dev/agent-runtime/internal/interfaces/telegram"
 	"github.com/dev/agent-runtime/internal/interfaces/web"
+	"github.com/dev/agent-runtime/internal/orchestrator"
+	"github.com/dev/agent-runtime/internal/planner"
 	"github.com/dev/agent-runtime/internal/runtime"
 	"github.com/dev/agent-runtime/internal/storage"
 	"github.com/dev/agent-runtime/internal/tools"
@@ -20,13 +22,18 @@ func main() {
 	}
 	defer store.Close()
 
+	llm := planner.NewPlanner(cfg.ZAIEndpoint, cfg.ZAIApiKey)
+
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewEchoTool())
 	reg.Register(tools.NewShellTool())
 	reg.Register(tools.NewWorkspaceTool())
 	reg.Register(tools.NewFilesTool())
 
-	rt := runtime.NewRuntime(cfg, store, reg)
+	orch := orchestrator.NewOrchestrator(cfg, store, reg, llm)
+	reg.Register(tools.NewDelegateTool(orch))
+
+	rt := runtime.NewRuntime(cfg, store, reg, llm)
 
 	bot := telegram.NewBot(cfg.TelegramToken, cfg.TelegramAllowID, rt)
 	go bot.Start()

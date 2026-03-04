@@ -5,6 +5,8 @@ import "fmt"
 type ToolContext struct {
 	SessionID string
 	Workspace string
+	Depth     int
+	MaxDepth  int
 }
 
 type ToolParam struct {
@@ -49,4 +51,22 @@ func (r *Registry) ListTools() []Tool {
 		list = append(list, t)
 	}
 	return list
+}
+
+func (r *Registry) FilterByNames(names []string) *Registry {
+	filtered := NewRegistry()
+	for _, name := range names {
+		if t, ok := r.tools[name]; ok {
+			filtered.Register(t)
+		}
+	}
+	return filtered
+}
+
+func (r *Registry) Clone() *Registry {
+	clone := NewRegistry()
+	for name, t := range r.tools {
+		clone.tools[name] = t
+	}
+	return clone
 }

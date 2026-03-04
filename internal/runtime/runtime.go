@@ -25,12 +25,12 @@ type Runtime struct {
 	sessions map[string]*Session
 }
 
-func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry) *Runtime {
+func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry, llm *planner.Planner) *Runtime {
 	return &Runtime{
 		cfg:      cfg,
 		store:    store,
 		registry: reg,
-		llm:      planner.NewPlanner(cfg.ZAIEndpoint, cfg.ZAIApiKey),
+		llm:      llm,
 		mem:      memory.NewMemoryAgent(cfg.ZAIEndpoint, cfg.ZAIApiKey),
 		toolDefs: planner.BuildToolDefinitions(reg),
 		sessions: make(map[string]*Session),
@@ -203,7 +203,12 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 			args := make(map[string]string)
 			json.Unmarshal([]byte(tc.Function.Arguments), &args)
 
-			ctx := tools.ToolContext{SessionID: s.ID, Workspace: r.cfg.WorkspaceRoot}
+			ctx := tools.ToolContext{
+				SessionID: s.ID,
+				Workspace: r.cfg.WorkspaceRoot,
+				Depth:     0,
+				MaxDepth:  r.cfg.MaxAgentDepth,
+			}
 			out, execErr := tool.Execute(ctx, args)
 			if execErr != nil {
 				output = fmt.Sprintf("Error: %v", execErr)
