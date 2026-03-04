@@ -1,0 +1,41 @@
+# Binários
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/agent
+/agent-runtime
+
+# Arquivos de teste
+*.test
+*.out
+coverage.html
+
+# Dependências
+/vendor/
+
+# IDE e editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Banco de dados local (se houver)
+*.db
+*.sqlite
+*.sqlite3
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
