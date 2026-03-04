@@ -28,6 +28,19 @@ type ToolLog struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type Project struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Description string `json:"description"`
+	Status      string `json:"status"` // active, paused, done, archived
+	TechStack   string `json:"tech_stack"`
+	GitRemote   string `json:"git_remote"`
+	Notes       string `json:"notes"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 func NewStorage(dbPath string) (*Storage, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -41,28 +54,27 @@ func NewStorage(dbPath string) (*Storage, error) {
 }
 
 func (s *Storage) InitSchema() error {
-	query := `
+	_, err := s.db.Exec(`
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		session_id TEXT,
-		role TEXT,
-		content TEXT,
+		session_id TEXT, role TEXT, content TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS tool_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		session_id TEXT,
-		tool_name TEXT,
-		input TEXT,
-		output TEXT,
-		status TEXT,
+		session_id TEXT, tool_name TEXT, input TEXT, output TEXT, status TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-	CREATE TABLE IF NOT EXISTS settings (
-		key TEXT PRIMARY KEY,
-		value TEXT
-	);`
-	_, err := s.db.Exec(query)
+	CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+	CREATE TABLE IF NOT EXISTS projects (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+		description TEXT DEFAULT '', status TEXT DEFAULT 'active',
+		tech_stack TEXT DEFAULT '', git_remote TEXT DEFAULT '',
+		notes TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`)
 	return err
 }
 
@@ -77,9 +89,7 @@ func (s *Storage) LogToolExecution(sessionID, toolName, input, output, status st
 }
 
 func (s *Storage) GetRecentMessages(sessionID string, limit int) ([]StoredMessage, error) {
-	rows, err := s.db.Query(
-		`SELECT session_id, role, content, created_at FROM messages
-		 WHERE session_id = ? ORDER BY id DESC LIMIT ?`, sessionID, limit)
+	rows, err := s.db.Query(`SELECT session_id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?`, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,9 +97,7 @@ func (s *Storage) GetRecentMessages(sessionID string, limit int) ([]StoredMessag
 	var msgs []StoredMessage
 	for rows.Next() {
 		var m StoredMessage
-		if err := rows.Scan(&m.SessionID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
-			continue
-		}
+		rows.Scan(&m.SessionID, &m.Role, &m.Content, &m.CreatedAt)
 		msgs = append(msgs, m)
 	}
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
@@ -99,9 +107,7 @@ func (s *Storage) GetRecentMessages(sessionID string, limit int) ([]StoredMessag
 }
 
 func (s *Storage) SearchOlderMessages(sessionID string, skip, limit int) ([]StoredMessage, error) {
-	rows, err := s.db.Query(
-		`SELECT session_id, role, content, created_at FROM messages
-		 ORDER BY id DESC LIMIT ? OFFSET ?`, limit, skip)
+	rows, err := s.db.Query(`SELECT session_id, role, content, created_at FROM messages ORDER BY id DESC LIMIT ? OFFSET ?`, limit, skip)
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +115,7 @@ func (s *Storage) SearchOlderMessages(sessionID string, skip, limit int) ([]Stor
 	var msgs []StoredMessage
 	for rows.Next() {
 		var m StoredMessage
-		if err := rows.Scan(&m.SessionID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
-			continue
-		}
+		rows.Scan(&m.SessionID, &m.Role, &m.Content, &m.CreatedAt)
 		msgs = append(msgs, m)
 	}
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
@@ -121,9 +125,7 @@ func (s *Storage) SearchOlderMessages(sessionID string, skip, limit int) ([]Stor
 }
 
 func (s *Storage) GetRecentToolLogs(limit int) ([]ToolLog, error) {
-	rows, err := s.db.Query(
-		`SELECT id, session_id, tool_name, input, output, status, created_at
-		 FROM tool_logs ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id, session_id, tool_name, input, output, status, created_at FROM tool_logs ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -131,21 +133,17 @@ func (s *Storage) GetRecentToolLogs(limit int) ([]ToolLog, error) {
 	var logs []ToolLog
 	for rows.Next() {
 		var l ToolLog
-		if err := rows.Scan(&l.ID, &l.SessionID, &l.ToolName, &l.Input, &l.Output, &l.Status, &l.CreatedAt); err != nil {
-			continue
-		}
+		rows.Scan(&l.ID, &l.SessionID, &l.ToolName, &l.Input, &l.Output, &l.Status, &l.CreatedAt)
 		logs = append(logs, l)
 	}
 	return logs, nil
 }
 
+// Settings
 func (s *Storage) GetSetting(key string) (string, error) {
-	var value string
-	err := s.db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&value)
-	if err != nil {
-		return "", err
-	}
-	return value, nil
+	var v string
+	err := s.db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+	return v, err
 }
 
 func (s *Storage) SetSetting(key, value string) error {
@@ -159,46 +157,94 @@ func (s *Storage) GetAllSettings() (map[string]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	settings := make(map[string]string)
+	m := make(map[string]string)
 	for rows.Next() {
 		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			continue
-		}
-		settings[k] = v
+		rows.Scan(&k, &v)
+		m[k] = v
 	}
-	return settings, nil
+	return m, nil
 }
 
 func (s *Storage) SaveAllSettings(settings map[string]string) error {
 	for k, v := range settings {
-		if err := s.SetSetting(k, v); err != nil {
-			return err
-		}
+		s.SetSetting(k, v)
 	}
 	return nil
 }
 
+// Projects
+func (s *Storage) GetAllProjects() ([]Project, error) {
+	rows, err := s.db.Query(`SELECT id, name, path, description, status, tech_stack, git_remote, notes, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		rows.Scan(&p.ID, &p.Name, &p.Path, &p.Description, &p.Status, &p.TechStack, &p.GitRemote, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
+		projects = append(projects, p)
+	}
+	return projects, nil
+}
+
+func (s *Storage) GetProject(id int) (*Project, error) {
+	var p Project
+	err := s.db.QueryRow(`SELECT id, name, path, description, status, tech_stack, git_remote, notes, created_at, updated_at FROM projects WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &p.Path, &p.Description, &p.Status, &p.TechStack, &p.GitRemote, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (s *Storage) CreateProject(name, path, description, techStack, gitRemote string) (int64, error) {
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO projects (name, path, description, tech_stack, git_remote) VALUES (?, ?, ?, ?, ?)`,
+		name, path, description, techStack, gitRemote)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Storage) UpdateProject(id int, name, description, status, notes string) error {
+	_, err := s.db.Exec(`UPDATE projects SET name=?, description=?, status=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		name, description, status, notes, id)
+	return err
+}
+
+func (s *Storage) DeleteProject(id int) error {
+	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	return err
+}
+
+func (s *Storage) ProjectExistsByPath(path string) bool {
+	var count int
+	s.db.QueryRow("SELECT COUNT(*) FROM projects WHERE path = ?", path).Scan(&count)
+	return count > 0
+}
+
+// Stats
 func (s *Storage) GetStats() (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
-	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&count)
-	stats["total_messages"] = count
-	s.db.QueryRow("SELECT COUNT(*) FROM tool_logs").Scan(&count)
-	stats["total_tool_executions"] = count
-	s.db.QueryRow("SELECT COUNT(*) FROM tool_logs WHERE status = 'OK'").Scan(&count)
-	stats["successful_executions"] = count
-	s.db.QueryRow("SELECT COUNT(DISTINCT session_id) FROM messages").Scan(&count)
-	stats["total_sessions"] = count
+	var c int
+	s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&c)
+	stats["total_messages"] = c
+	s.db.QueryRow("SELECT COUNT(*) FROM tool_logs").Scan(&c)
+	stats["total_tool_executions"] = c
+	s.db.QueryRow("SELECT COUNT(*) FROM tool_logs WHERE status = 'OK'").Scan(&c)
+	stats["successful_executions"] = c
+	s.db.QueryRow("SELECT COUNT(DISTINCT session_id) FROM messages").Scan(&c)
+	stats["total_sessions"] = c
+	s.db.QueryRow("SELECT COUNT(*) FROM projects").Scan(&c)
+	stats["total_projects"] = c
 	return stats, nil
 }
 
 func (s *Storage) StatsJSON() (string, error) {
-	stats, err := s.GetStats()
-	if err != nil {
-		return "{}", err
-	}
-	b, _ := json.Marshal(stats)
+	st, _ := s.GetStats()
+	b, _ := json.Marshal(st)
 	return string(b), nil
 }
 
