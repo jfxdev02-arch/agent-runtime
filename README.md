@@ -47,13 +47,18 @@ agent-runtime/
 │   ├── soul.md                    # Agent identity & capabilities
 │   ├── rules.md                   # Behavior rules
 │   └── tools.md                   # Tool usage instructions
+├── scripts/
+│   ├── install.sh                 # Auto-install as systemd service
+│   └── uninstall.sh               # Remove systemd service
+├── .env.example                   # Configuration template
+├── Makefile                       # Build & management commands
 ├── go.mod
 └── README.md
 ```
 
 ---
 
-## 🚀 Installation
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -62,25 +67,58 @@ agent-runtime/
 - An **OpenAI-compatible LLM API** (e.g., Z.AI, OpenAI, local models)
 - *(Optional)* Telegram bot via [@BotFather](https://t.me/BotFather)
 
-### Build
+### Option 1: Automated Install (recommended)
 
 ```bash
-# Clone
 git clone https://github.com/your-username/agent-runtime.git
 cd agent-runtime
 
-# Install dependencies
-go mod tidy
+# This will: create .env, build, install as systemd service
+make install
+```
 
-# Build (optimized)
-go build -ldflags="-w -s" -o agent-runtime cmd/agent/main.go
+Then edit `.env` with your API keys:
+```bash
+nano .env
+sudo systemctl restart agent-runtime
+```
+
+### Option 2: Manual Run
+
+```bash
+git clone https://github.com/your-username/agent-runtime.git
+cd agent-runtime
+
+cp .env.example .env
+nano .env                    # Fill in your API keys
+
+make run                     # Build and run locally
 ```
 
 ### Cross-compile for ARM64 (Raspberry Pi)
 
 ```bash
-GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o agent-runtime cmd/agent/main.go
+make build-pi
+scp agent-runtime user@raspberry-pi:~/agent-runtime/
 ```
+
+---
+
+## 🔧 Makefile Commands
+
+| Command | Description |
+|---|---|
+| `make build` | Build the binary |
+| `make install` | Build + install as systemd service (auto-start on boot) |
+| `make uninstall` | Remove systemd service |
+| `make run` | Build and run locally (not as service) |
+| `make start` | Start the service |
+| `make stop` | Stop the service |
+| `make restart` | Restart the service |
+| `make status` | Check service status |
+| `make logs` | Tail service logs |
+| `make build-pi` | Cross-compile for Raspberry Pi (ARM64) |
+| `make clean` | Remove built binary |
 
 ---
 
@@ -176,30 +214,19 @@ reg.Register(tools.NewMyTool())
 
 ---
 
-## 🐳 Deploy as Service (systemd)
+## 🐳 Deploy as Service
+
+The easiest way to deploy is via the included install script:
 
 ```bash
-sudo tee /etc/systemd/system/agent-runtime.service << EOF
-[Unit]
-Description=Agent Runtime
-After=network.target
+make install        # Build, create .env, install systemd service
+nano .env           # Edit with your API keys
+make restart        # Apply changes
+```
 
-[Service]
-Type=simple
-User=YOUR_USER
-WorkingDirectory=/path/to/agent-runtime
-EnvironmentFile=/path/to/agent-runtime/.env
-ExecStart=/path/to/agent-runtime/agent-runtime
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable agent-runtime
-sudo systemctl start agent-runtime
+To remove:
+```bash
+make uninstall
 ```
 
 ---

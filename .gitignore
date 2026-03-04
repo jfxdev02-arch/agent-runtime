@@ -1,37 +1,37 @@
-# Binários
+# Binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-/agent
-/agent-runtime
+agent-runtime
+agent-runtime-rpi
 
-# Arquivos de teste
+# Test files
 *.test
 *.out
 coverage.html
 
-# Dependências
+# Dependencies
 /vendor/
 
-# IDE e editores
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# Sistema operacional
+# OS
 .DS_Store
 Thumbs.db
 
-# Banco de dados local (se houver)
+# Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Variáveis de ambiente
+# Environment (contains secrets)
 .env
 .env.local
 .env.*.local
