@@ -31,7 +31,7 @@ func main() {
 	bot := telegram.NewBot(cfg.TelegramToken, cfg.TelegramAllowID, rt)
 	go bot.Start()
 
-	srv := web.NewServer(rt, cfg.Port)
+	srv := web.NewServer(rt, store, cfg.Port)
 	if err := srv.Start(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
