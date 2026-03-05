@@ -39,8 +39,8 @@ func LoadConfig() *Config {
 		Port:            getEnv("PORT", "8080"),
 		MaxHistory:      getEnvInt("MAX_HISTORY", 25),
 		MaxTurns:        getEnvInt("MAX_TURNS", 12),
-		// 0 disables hard wall-clock cutoff; loop safety is handled by no-progress detectors.
-		MaxRunSeconds:   getEnvInt("MAX_RUN_SECONDS", 0),
+		// Hard wall-clock cutoff to prevent runaway loops.
+		MaxRunSeconds:   getEnvInt("MAX_RUN_SECONDS", 300),
 		MaxToolCalls:    getEnvInt("MAX_TOOL_CALLS", 20),
 		LoopHistorySize: getEnvInt("LOOP_HISTORY_SIZE", 30),
 		LoopWarnAt:      getEnvInt("LOOP_WARN_AT", 10),

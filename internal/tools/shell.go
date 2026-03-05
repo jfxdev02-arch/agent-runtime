@@ -28,7 +28,7 @@ func (t *ShellTool) Execute(ctx ToolContext, args map[string]string) (string, er
 		return "", fmt.Errorf("empty command")
 	}
 
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "bash", "-c", command)
@@ -42,7 +42,7 @@ func (t *ShellTool) Execute(ctx ToolContext, args map[string]string) (string, er
 	err := cmd.Run()
 	if err != nil {
 		if cmdCtx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("timeout (120s)")
+			return "", fmt.Errorf("timeout (60s) — command took too long, it may be a long-running daemon that should be run as a background service instead")
 		}
 		combined := out.String() + "\n" + stderr.String()
 		return combined, fmt.Errorf("exit error: %v", err)

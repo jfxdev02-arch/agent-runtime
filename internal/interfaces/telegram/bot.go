@@ -18,6 +18,7 @@ import (
 const typingInterval = 4 * time.Second
 const progressFirstUpdate = 20 * time.Second
 const progressUpdateInterval = 30 * time.Second
+const maxProgressMessages = 5
 
 type Bot struct {
 	token    string
@@ -234,11 +235,16 @@ func (b *Bot) startProgressLoop(chatID string) chan struct{} {
 
 		ticker := time.NewTicker(progressUpdateInterval)
 		defer ticker.Stop()
+		count := 0
 		for {
 			select {
 			case <-done:
 				return
 			case <-ticker.C:
+				count++
+				if count > maxProgressMessages {
+					return
+				}
 				b.sendMessage(chatID, "Processing is still in progress. Thanks for waiting.")
 			}
 		}

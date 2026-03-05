@@ -11,11 +11,13 @@ type Session struct {
 	PendingIndex         int
 	PendingAssistantMsg  *planner.Message
 	AwaitingConfirmation bool
+	LoopState            *LoopState
 }
 
 func NewSession(id string) *Session {
 	return &Session{
-		ID:      id,
-		History: make([]planner.Message, 0),
+		ID:        id,
+		History:   make([]planner.Message, 0),
+		LoopState: NewLoopState(),
 	}
 }
