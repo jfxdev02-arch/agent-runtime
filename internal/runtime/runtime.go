@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -27,10 +29,24 @@ type Runtime struct {
 }
 
 type loopLimits struct {
-	deadline       time.Time
-	toolCalls      int
-	lastToolChain  string
-	repeatedChains int
+	deadline    time.Time
+	toolCalls   int
+	history     []toolCallRecord
+	warnBuckets map[string]int
+}
+
+type toolCallRecord struct {
+	toolName   string
+	argsHash   string
+	resultHash string
+}
+
+type loopDetectionResult struct {
+	stuck   bool
+	warning bool
+	key     string
+	count   int
+	message string
 }
 
 func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry, llm *planner.Planner) *Runtime {
@@ -178,22 +194,8 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 
 	// No tool calls: LLM gave a direct text response
 	if len(resp.ToolCalls) == 0 {
-		limits.lastToolChain = ""
-		limits.repeatedChains = 0
 		text := resp.Content
 		return r.finishWithMessage(s, text), false
-	}
-
-	chain := toolChainSignature(resp.ToolCalls)
-	if chain == limits.lastToolChain {
-		limits.repeatedChains++
-	} else {
-		limits.lastToolChain = chain
-		limits.repeatedChains = 1
-	}
-	if limits.repeatedChains >= r.cfg.MaxToolRepeats {
-		msg := fmt.Sprintf("Detected repeated tool loop (%d identical tool rounds). Stopping for safety.", limits.repeatedChains)
-		return r.finishWithMessage(s, msg), false
 	}
 
 	// LLM requested tool calls — check for high-risk ones that need approval
@@ -290,6 +292,22 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 
 		resultSummary.WriteString(fmt.Sprintf("[%s] %s\n", tc.Function.Name, output))
 
+		argsHash := hashText(tc.Function.Name + "|" + strings.TrimSpace(tc.Function.Arguments))
+		resultHash := hashText(strings.TrimSpace(output))
+		r.recordToolCall(limits, tc.Function.Name, argsHash, resultHash)
+
+		if det := r.detectToolLoop(limits, tc.Function.Name, argsHash, resultHash); det.stuck {
+			msg := det.message
+			if det.warning {
+				msg = "Potential tool loop detected, but execution can continue: " + det.message
+			} else {
+				return r.finishWithMessage(s, msg), false
+			}
+			if r.shouldEmitLoopWarning(limits, det.key, det.count) {
+				log.Printf("loop warning: %s", msg)
+			}
+		}
+
 		// Add tool result message to history
 		toolResultMsg := planner.Message{
 			Role:       "tool",
@@ -311,7 +329,10 @@ func (r *Runtime) finishWithMessage(s *Session, text string) string {
 }
 
 func (r *Runtime) newLoopLimits() *loopLimits {
-	limits := &loopLimits{}
+	limits := &loopLimits{
+		history:     make([]toolCallRecord, 0),
+		warnBuckets: make(map[string]int),
+	}
 	if r.cfg.MaxRunSeconds > 0 {
 		limits.deadline = time.Now().Add(time.Duration(r.cfg.MaxRunSeconds) * time.Second)
 	}
@@ -325,13 +346,183 @@ func (r *Runtime) isTimedOut(limits *loopLimits) bool {
 	return time.Now().After(limits.deadline)
 }
 
-func toolChainSignature(toolCalls []planner.ToolCall) string {
-	var sb strings.Builder
-	for _, tc := range toolCalls {
-		sb.WriteString(tc.Function.Name)
-		sb.WriteString("|")
-		sb.WriteString(strings.TrimSpace(tc.Function.Arguments))
-		sb.WriteString(";")
+func hashText(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+func (r *Runtime) shouldEmitLoopWarning(limits *loopLimits, key string, count int) bool {
+	if limits == nil || key == "" {
+		return true
 	}
-	return sb.String()
+	if limits.warnBuckets == nil {
+		limits.warnBuckets = make(map[string]int)
+	}
+	bucket := count / 10
+	if bucket < 1 {
+		bucket = 1
+	}
+	if prev, ok := limits.warnBuckets[key]; ok && bucket <= prev {
+		return false
+	}
+	limits.warnBuckets[key] = bucket
+	return true
+}
+
+func (r *Runtime) recordToolCall(limits *loopLimits, toolName, argsHash, resultHash string) {
+	if limits == nil {
+		return
+	}
+	limits.history = append(limits.history, toolCallRecord{
+		toolName:   toolName,
+		argsHash:   argsHash,
+		resultHash: resultHash,
+	})
+
+	max := r.cfg.LoopHistorySize
+	if max <= 0 {
+		max = 30
+	}
+	if len(limits.history) > max {
+		limits.history = limits.history[len(limits.history)-max:]
+	}
+}
+
+func (r *Runtime) detectToolLoop(limits *loopLimits, toolName, argsHash, resultHash string) loopDetectionResult {
+	if limits == nil || len(limits.history) == 0 {
+		return loopDetectionResult{}
+	}
+
+	warnAt := r.cfg.LoopWarnAt
+	if warnAt <= 0 {
+		warnAt = 10
+	}
+	criticalAt := r.cfg.LoopCriticalAt
+	if criticalAt <= warnAt {
+		criticalAt = warnAt + 1
+	}
+	globalAt := r.cfg.LoopGlobalAt
+	if globalAt <= criticalAt {
+		globalAt = criticalAt + 1
+	}
+
+	noProgressStreak := 0
+	for i := len(limits.history) - 1; i >= 0; i-- {
+		h := limits.history[i]
+		if h.toolName != toolName || h.argsHash != argsHash {
+			continue
+		}
+		if h.resultHash != resultHash {
+			break
+		}
+		noProgressStreak++
+	}
+	if noProgressStreak >= globalAt {
+		return loopDetectionResult{
+			stuck:   true,
+			warning: false,
+			key:     "global:" + toolName + ":" + argsHash + ":" + resultHash,
+			count:   noProgressStreak,
+			message: fmt.Sprintf("CRITICAL: %s repeated identical no-progress outcomes %d times. Stopping to prevent runaway loop.", toolName, noProgressStreak),
+		}
+	}
+
+	recentCount := 0
+	for i := len(limits.history) - 1; i >= 0; i-- {
+		h := limits.history[i]
+		if h.toolName == toolName && h.argsHash == argsHash {
+			recentCount++
+		}
+	}
+	if recentCount >= warnAt {
+		return loopDetectionResult{
+			stuck:   true,
+			warning: true,
+			key:     "generic:" + toolName + ":" + argsHash,
+			count:   recentCount,
+			message: fmt.Sprintf("WARNING: %s called %d times with identical arguments.", toolName, recentCount),
+		}
+	}
+
+	pingCount, pingNoProgress := detectPingPongStreak(limits.history)
+	if pingCount >= criticalAt && pingNoProgress {
+		return loopDetectionResult{
+			stuck:   true,
+			warning: false,
+			key:     "pingpong",
+			count:   pingCount,
+			message: fmt.Sprintf("CRITICAL: alternating tool pattern repeated %d calls with no progress. Stopping to prevent ping-pong loop.", pingCount),
+		}
+	}
+	if pingCount >= warnAt {
+		return loopDetectionResult{
+			stuck:   true,
+			warning: true,
+			key:     "pingpong",
+			count:   pingCount,
+			message: fmt.Sprintf("WARNING: alternating tool pattern detected (%d tail calls).", pingCount),
+		}
+	}
+
+	return loopDetectionResult{}
+}
+
+func detectPingPongStreak(history []toolCallRecord) (int, bool) {
+	if len(history) < 4 {
+		return 0, false
+	}
+	last := history[len(history)-1]
+	prev := history[len(history)-2]
+	if last.argsHash == prev.argsHash {
+		return 0, false
+	}
+
+	a := last.argsHash
+	b := prev.argsHash
+	count := 2
+	for i := len(history) - 3; i >= 0; i-- {
+		expected := a
+		if count%2 == 1 {
+			expected = b
+		}
+		if history[i].argsHash != expected {
+			break
+		}
+		count++
+	}
+
+	if count < 4 {
+		return 0, false
+	}
+
+	var hashA, hashB string
+	noProgress := true
+	for i := len(history) - count; i < len(history); i++ {
+		h := history[i]
+		if h.argsHash == a {
+			if hashA == "" {
+				hashA = h.resultHash
+			} else if hashA != h.resultHash {
+				noProgress = false
+				break
+			}
+			continue
+		}
+		if h.argsHash == b {
+			if hashB == "" {
+				hashB = h.resultHash
+			} else if hashB != h.resultHash {
+				noProgress = false
+				break
+			}
+			continue
+		}
+		noProgress = false
+		break
+	}
+
+	if hashA == "" || hashB == "" {
+		noProgress = false
+	}
+	return count, noProgress
 }

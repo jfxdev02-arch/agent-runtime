@@ -137,7 +137,13 @@ All configuration is via **environment variables**:
 | `DB_PATH` | ❌ | `agent.db` | SQLite database path |
 | `PORT` | ❌ | `8080` | Web server port |
 | `MAX_HISTORY` | ❌ | `25` | Messages in context (sliding window) |
-| `MAX_TURNS` | ❌ | `50` | Max turns in agentic loop |
+| `MAX_TURNS` | ❌ | `12` | Max turns in agentic loop |
+| `MAX_RUN_SECONDS` | ❌ | `0` | Optional hard wall-clock cutoff for one run (`0` disables) |
+| `MAX_TOOL_CALLS` | ❌ | `20` | Max tool calls in one run |
+| `LOOP_HISTORY_SIZE` | ❌ | `30` | Number of recent tool calls used for loop detection |
+| `LOOP_WARN_AT` | ❌ | `10` | Warning threshold for repeated tool patterns |
+| `LOOP_CRITICAL_AT` | ❌ | `20` | Critical threshold for ping-pong no-progress loops |
+| `LOOP_GLOBAL_AT` | ❌ | `30` | Global breaker threshold for identical no-progress results |
 | `AGENT_NAME` | ❌ | `Cronos` | Agent display name |
 | `LANGUAGE` | ❌ | `en` | UI language (`en`, `pt-BR`, `es`, `fr`, `de`, `ja`, `zh`) |
 
