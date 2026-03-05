@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,13 +71,10 @@ func CheckForUpdates() (*UpdateInfo, error) {
 		return nil, fmt.Errorf("failed to parse GitHub response: %v", err)
 	}
 
-	latest := normalizeVersion(release.TagName)
-	current := normalizeVersion(Version)
-
 	return &UpdateInfo{
 		CurrentVersion:  Version,
 		LatestVersion:   release.TagName,
-		UpdateAvailable: latest != current && latest > current,
+		UpdateAvailable: isNewerVersion(release.TagName, Version),
 		ReleaseNotes:    release.Body,
 		ReleaseURL:      release.HTMLURL,
 		PublishedAt:     release.PublishedAt,
@@ -84,8 +82,9 @@ func CheckForUpdates() (*UpdateInfo, error) {
 }
 
 // checkFromTags falls back to checking the latest git tag via the API.
+// Fetches multiple tags and picks the highest semver version.
 func checkFromTags() (*UpdateInfo, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/tags?per_page=1", githubAPI, repoOwner, repoName)
+	url := fmt.Sprintf("%s/repos/%s/%s/tags?per_page=30", githubAPI, repoOwner, repoName)
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(url)
@@ -109,13 +108,18 @@ func checkFromTags() (*UpdateInfo, error) {
 		}, nil
 	}
 
-	latest := normalizeVersion(tags[0].Name)
-	current := normalizeVersion(Version)
+	// Find the highest version tag
+	best := tags[0].Name
+	for _, t := range tags[1:] {
+		if isNewerVersion(t.Name, best) {
+			best = t.Name
+		}
+	}
 
 	return &UpdateInfo{
 		CurrentVersion:  Version,
-		LatestVersion:   tags[0].Name,
-		UpdateAvailable: latest != current && latest > current,
+		LatestVersion:   best,
+		UpdateAvailable: isNewerVersion(best, Version),
 	}, nil
 }
 
@@ -151,8 +155,9 @@ func ApplyUpdate(projectDir string) *UpdateResult {
 		newVer = "unknown"
 	}
 
-	// Step 3: Rebuild binary with the new version embedded
+	// Step 3: Tidy modules and rebuild binary with the new version embedded
 	log.Println("[updater] Step 2/3: Rebuilding binary...")
+	_, _ = runCmd(projectDir, "go", "mod", "tidy")
 	ldflags := fmt.Sprintf("-w -s -X github.com/dev/agent-runtime/internal/updater.Version=%s", newVer)
 	out, err = runCmd(projectDir, "go", "build", "-ldflags", ldflags, "-o", "agent-runtime", "cmd/agent/main.go")
 	allOutput.WriteString("=== go build ===\n" + out + "\n")
@@ -205,4 +210,42 @@ func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	v = strings.TrimPrefix(v, "v")
 	return v
+}
+
+// parseSemver extracts major, minor, patch from a version string like "v1.0.6" or "1.0.6".
+// Returns (0,0,0, false) if parsing fails.
+func parseSemver(v string) (int, int, int, bool) {
+	v = normalizeVersion(v)
+	// Strip anything after a hyphen (e.g. "1.0.6-dirty" -> "1.0.6")
+	if idx := strings.Index(v, "-"); idx >= 0 {
+		v = v[:idx]
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	patch, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, 0, false
+	}
+	return major, minor, patch, true
+}
+
+// isNewerVersion returns true if candidate is a higher semver than current.
+func isNewerVersion(candidate, current string) bool {
+	cMaj, cMin, cPat, cOk := parseSemver(candidate)
+	rMaj, rMin, rPat, rOk := parseSemver(current)
+	if !cOk || !rOk {
+		// Fallback to string comparison if parsing fails
+		return normalizeVersion(candidate) > normalizeVersion(current)
+	}
+	if cMaj != rMaj {
+		return cMaj > rMaj
+	}
+	if cMin != rMin {
+		return cMin > rMin
+	}
+	return cPat > rPat
 }
