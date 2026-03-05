@@ -33,6 +33,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .btn-ghost{background:var(--bg3);color:var(--t2);border:1px solid var(--brd)}.btn-ghost:hover{border-color:var(--ac);color:var(--t1)}
 .btn-danger{background:rgba(239,68,68,.15);color:var(--err);border:1px solid rgba(239,68,68,.2)}.btn-danger:hover{background:rgba(239,68,68,.25)}
 .chat-c{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.chat-layout{flex:1;display:flex;min-height:0}
+.chat-sidebar{width:280px;min-width:240px;background:var(--bg2);border-right:1px solid var(--brd);display:flex;flex-direction:column}
+.chat-sidebar-h{padding:14px;border-bottom:1px solid var(--brd)}
+.chat-sessions{flex:1;overflow-y:auto;padding:10px}
+.chat-session{width:100%;text-align:left;background:var(--bg3);border:1px solid var(--brd);color:var(--t1);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:var(--tr)}
+.chat-session:hover{border-color:var(--brd-a)}
+.chat-session.active{border-color:var(--ac);box-shadow:0 0 0 2px var(--acg)}
+.chat-session-id{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3);margin-bottom:4px}
+.chat-session-msg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-session-empty{font-size:12px;color:var(--t3);padding:12px;text-align:center}
 .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:16px}
 .msg{max-width:80%;padding:14px 18px;border-radius:16px;font-size:14px;line-height:1.6;animation:fadeIn .3s ease;word-wrap:break-word;white-space:pre-wrap}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -92,7 +102,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .toast{position:fixed;bottom:24px;right:24px;padding:12px 24px;border-radius:var(--r);font-size:14px;font-weight:500;animation:slideUp .3s;z-index:1000;box-shadow:var(--sh)}
 .toast-ok{background:var(--ok);color:#fff}.toast-err{background:var(--err);color:#fff}
 @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-@media(max-width:768px){.sidebar{width:56px}.msgs{padding:16px}.msg{max-width:90%}.st-grid{grid-template-columns:1fr 1fr}.proj-grid{grid-template-columns:1fr}}
+@media(max-width:768px){.sidebar{width:56px}.msgs{padding:16px}.msg{max-width:90%}.st-grid{grid-template-columns:1fr 1fr}.proj-grid{grid-template-columns:1fr}.chat-sidebar{display:none}}
 </style>
 </head>
 <body>
@@ -106,10 +116,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 </aside>
 <main class="main">
   <div id="page-chat" class="page active">
-    <div class="hdr"><h1 id="chatTitle">Chat</h1><span class="badge badge-on">● Online</span></div>
-    <div class="chat-c"><div class="msgs" id="messages"></div>
-      <div class="chat-in"><textarea id="chatInput" placeholder="" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button></div>
+    <div class="hdr"><h1 id="chatTitle">Chat</h1><span class="badge badge-on" id="chatSessionBadge">● Online</span></div>
+    <div class="chat-layout">
+      <aside class="chat-sidebar">
+        <div class="chat-sidebar-h"><button class="btn btn-primary" style="width:100%" id="btnNewChat" onclick="newChat()">+ New Chat</button></div>
+        <div class="chat-sessions" id="chatSessions"></div>
+      </aside>
+      <div class="chat-c"><div class="msgs" id="messages"></div>
+        <div class="chat-in"><textarea id="chatInput" placeholder="" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button></div>
+      </div>
     </div>
   </div>
   <div id="page-projects" class="page">
@@ -223,14 +239,15 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 </div></div>
 <script>
 let currentProj=null, appCfg={agent_name:'Agent',language:'en'};
+let currentSessionId='web-default';
 const esc=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 const escPre=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // i18n
 const i18n={
-  en:{chat:'Chat',projects:'Projects',settings:'Settings',logs:'Tool Logs',status:'System Status',save:'Save',refresh:'Refresh',scan:'🔍 Scan Workspace',newProj:'+ New Project',addProj:'Add Project',add:'Add',overview:'Overview',notes:'Notes',name:'Name',desc:'Description',delete:'Delete',welcome:'Hello! I am your agentic assistant. How can I help?',placeholder:'Send a message...',noProj:'No projects yet. Use "Scan Workspace" or add manually.',noLogs:'No logs recorded yet.',saved:'Saved!',deleted:'Deleted!',added:'Project added!',scanned:' projects found!',confirmDel:'Delete project ',sysUpdate:'System Update',currentVer:'Current Version',checkUpdate:'Check for Updates',applyUpdate:'Update Now',upToDate:'✅ You are up to date!',updateAvail:'🆕 New version available: ',updating:'Updating... please wait...',updateOk:'✅ Update applied! Restarting...',updateFail:'❌ Update failed',noRelease:'No release notes',relNotes:'Release Notes'},
-  'pt-BR':{chat:'Chat',projects:'Projetos',settings:'Configurações',logs:'Logs de Tools',status:'Status do Sistema',save:'Salvar',refresh:'Atualizar',scan:'🔍 Escanear Workspace',newProj:'+ Novo Projeto',addProj:'Adicionar Projeto',add:'Adicionar',overview:'Visão Geral',notes:'Notas',name:'Nome',desc:'Descrição',delete:'Excluir',welcome:'Olá! Sou seu assistente agêntico. Como posso ajudar?',placeholder:'Envie uma mensagem...',noProj:'Nenhum projeto. Use "Escanear Workspace" ou adicione manualmente.',noLogs:'Nenhum log registrado.',saved:'Salvo!',deleted:'Excluído!',added:'Projeto adicionado!',scanned:' projetos encontrados!',confirmDel:'Excluir projeto ',sysUpdate:'Atualização do Sistema',currentVer:'Versão Atual',checkUpdate:'Buscar Atualizações',applyUpdate:'Atualizar Agora',upToDate:'✅ Você está atualizado!',updateAvail:'🆕 Nova versão disponível: ',updating:'Atualizando... aguarde...',updateOk:'✅ Atualização aplicada! Reiniciando...',updateFail:'❌ Falha na atualização',noRelease:'Sem notas de versão',relNotes:'Notas da Versão'},
-  es:{chat:'Chat',projects:'Proyectos',settings:'Configuración',logs:'Registros',status:'Estado del Sistema',save:'Guardar',refresh:'Actualizar',scan:'🔍 Escanear',newProj:'+ Nuevo',addProj:'Agregar Proyecto',add:'Agregar',overview:'General',notes:'Notas',name:'Nombre',desc:'Descripción',delete:'Eliminar',welcome:'¡Hola! Soy tu asistente agéntico. ¿Cómo puedo ayudar?',placeholder:'Envía un mensaje...',noProj:'Sin proyectos. Escanea o agrega manualmente.',noLogs:'Sin registros.',saved:'¡Guardado!',deleted:'¡Eliminado!',added:'¡Proyecto agregado!',scanned:' proyectos encontrados!',confirmDel:'Eliminar proyecto ',sysUpdate:'Actualización del Sistema',currentVer:'Versión Actual',checkUpdate:'Buscar Actualizaciones',applyUpdate:'Actualizar Ahora',upToDate:'✅ ¡Estás al día!',updateAvail:'🆕 Nueva versión disponible: ',updating:'Actualizando... espere...',updateOk:'✅ ¡Actualización aplicada! Reiniciando...',updateFail:'❌ Error en la actualización',noRelease:'Sin notas de versión',relNotes:'Notas de Versión'}
+  en:{chat:'Chat',projects:'Projects',settings:'Settings',logs:'Tool Logs',status:'System Status',save:'Save',refresh:'Refresh',scan:'🔍 Scan Workspace',newProj:'+ New Project',addProj:'Add Project',add:'Add',overview:'Overview',notes:'Notes',name:'Name',desc:'Description',delete:'Delete',welcome:'Hello! I am your agentic assistant. How can I help?',placeholder:'Send a message...',noProj:'No projects yet. Use "Scan Workspace" or add manually.',noLogs:'No logs recorded yet.',saved:'Saved!',deleted:'Deleted!',added:'Project added!',scanned:' projects found!',confirmDel:'Delete project ',sysUpdate:'System Update',currentVer:'Current Version',checkUpdate:'Check for Updates',applyUpdate:'Update Now',upToDate:'✅ You are up to date!',updateAvail:'🆕 New version available: ',updating:'Updating... please wait...',updateOk:'✅ Update applied! Restarting...',updateFail:'❌ Update failed',noRelease:'No release notes',relNotes:'Release Notes',newChat:'+ New Chat',chatHistoryEmpty:'No previous chats',session:'Session'},
+  'pt-BR':{chat:'Chat',projects:'Projetos',settings:'Configurações',logs:'Logs de Tools',status:'Status do Sistema',save:'Salvar',refresh:'Atualizar',scan:'🔍 Escanear Workspace',newProj:'+ Novo Projeto',addProj:'Adicionar Projeto',add:'Adicionar',overview:'Visão Geral',notes:'Notas',name:'Nome',desc:'Descrição',delete:'Excluir',welcome:'Olá! Sou seu assistente agêntico. Como posso ajudar?',placeholder:'Envie uma mensagem...',noProj:'Nenhum projeto. Use "Escanear Workspace" ou adicione manualmente.',noLogs:'Nenhum log registrado.',saved:'Salvo!',deleted:'Excluído!',added:'Projeto adicionado!',scanned:' projetos encontrados!',confirmDel:'Excluir projeto ',sysUpdate:'Atualização do Sistema',currentVer:'Versão Atual',checkUpdate:'Buscar Atualizações',applyUpdate:'Atualizar Agora',upToDate:'✅ Você está atualizado!',updateAvail:'🆕 Nova versão disponível: ',updating:'Atualizando... aguarde...',updateOk:'✅ Atualização aplicada! Reiniciando...',updateFail:'❌ Falha na atualização',noRelease:'Sem notas de versão',relNotes:'Notas da Versão',newChat:'+ Novo Chat',chatHistoryEmpty:'Sem chats anteriores',session:'Sessão'},
+  es:{chat:'Chat',projects:'Proyectos',settings:'Configuración',logs:'Registros',status:'Estado del Sistema',save:'Guardar',refresh:'Actualizar',scan:'🔍 Escanear',newProj:'+ Nuevo',addProj:'Agregar Proyecto',add:'Agregar',overview:'General',notes:'Notas',name:'Nombre',desc:'Descripción',delete:'Eliminar',welcome:'¡Hola! Soy tu asistente agéntico. ¿Cómo puedo ayudar?',placeholder:'Envía un mensaje...',noProj:'Sin proyectos. Escanea o agrega manualmente.',noLogs:'Sin registros.',saved:'¡Guardado!',deleted:'¡Eliminado!',added:'¡Proyecto agregado!',scanned:' proyectos encontrados!',confirmDel:'Eliminar proyecto ',sysUpdate:'Actualización del Sistema',currentVer:'Versión Actual',checkUpdate:'Buscar Actualizaciones',applyUpdate:'Actualizar Ahora',upToDate:'✅ ¡Estás al día!',updateAvail:'🆕 Nueva versión disponible: ',updating:'Actualizando... espere...',updateOk:'✅ ¡Actualización aplicada! Reiniciando...',updateFail:'❌ Error en la actualización',noRelease:'Sin notas de versión',relNotes:'Notas de Versión',newChat:'+ Nuevo Chat',chatHistoryEmpty:'Sin chats anteriores',session:'Sesión'}
 };
 
 function t(key){const lang=i18n[appCfg.language]||i18n.en;return lang[key]||i18n.en[key]||key}
@@ -253,6 +270,7 @@ function applyI18n(){
   document.getElementById('addTitle').textContent=t('addProj');
   document.getElementById('btnAddProj').textContent=t('add');
   document.getElementById('chatInput').placeholder=t('placeholder');
+  document.getElementById('btnNewChat').textContent=t('newChat');
   document.getElementById('logoLetter').textContent=appCfg.agent_name.charAt(0).toUpperCase();
   document.title=appCfg.agent_name+' — Agent Runtime';
   document.getElementById('secUpdate').textContent=t('sysUpdate');
@@ -269,7 +287,19 @@ async function loadAppConfig(){
 function showPage(n,btn){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('page-'+n).classList.add('active');btn.classList.add('active');if(n==='logs')loadLogs();if(n==='status')loadStatus();if(n==='settings')loadSettings();if(n==='projects')loadProjects()}
 function toast(m,type='ok'){const d=document.createElement('div');d.className='toast toast-'+type;d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3000)}
 
-async function sendMsg(){const i=document.getElementById('chatInput'),txt=i.value.trim();if(!txt)return;appendMsg('user',txt);i.value='';i.style.height='52px';const b=document.getElementById('sendBtn');b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:'web-default',message:txt})});const d=await r.json();appendMsg('assistant',d.reply)}catch(e){appendMsg('assistant','Error: '+e.message)}b.disabled=false;b.innerHTML='➤'}
+async function sendMsg(){const i=document.getElementById('chatInput'),txt=i.value.trim();if(!txt)return;appendMsg('user',txt);i.value='';i.style.height='52px';const b=document.getElementById('sendBtn');b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:currentSessionId,message:txt})});const d=await r.json();currentSessionId=d.session_id||currentSessionId;updateSessionBadge();appendMsg('assistant',d.reply);loadChatSessions()}catch(e){appendMsg('assistant','Error: '+e.message)}b.disabled=false;b.innerHTML='➤'}
+
+function updateSessionBadge(){document.getElementById('chatSessionBadge').textContent=t('session')+': '+currentSessionId}
+
+function renderChatSessions(list){const c=document.getElementById('chatSessions');if(!list||!list.length){c.innerHTML='<div class="chat-session-empty">'+t('chatHistoryEmpty')+'</div>';return}c.innerHTML=list.map(s=>{const sid=(s.session_id||'').replace(/'/g,'');const msg=escPre((s.last_message||'').slice(0,80));const active=sid===currentSessionId?' active':'';return '<button class="chat-session'+active+'" onclick="openSession(\''+sid+'\')"><div class="chat-session-id">'+escPre(sid)+'</div><div class="chat-session-msg">'+(msg||'-')+'</div></button>'}).join('')}
+
+async function loadChatSessions(){try{const r=await fetch('/api/chats?prefix=web-&limit=40');const sessions=await r.json();renderChatSessions(sessions)}catch(e){}}
+
+async function loadChatHistory(sessionID){try{const r=await fetch('/api/chat/history?session_id='+encodeURIComponent(sessionID));const msgs=await r.json();const c=document.getElementById('messages');c.innerHTML='';if(!msgs||!msgs.length){appendMsg('assistant',t('welcome'));return}msgs.forEach(m=>{if(m.role==='user'||m.role==='assistant'){appendMsg(m.role,m.content)}})}catch(e){appendMsg('assistant','Error: '+e.message)}}
+
+async function openSession(sessionID){currentSessionId=sessionID;updateSessionBadge();await loadChatHistory(sessionID);await loadChatSessions()}
+
+async function newChat(){try{const r=await fetch('/api/chat/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:'web'})});const d=await r.json();currentSessionId=d.session_id;updateSessionBadge();document.getElementById('messages').innerHTML='';appendMsg('assistant',t('welcome'));loadChatSessions()}catch(e){toast('Error: '+e.message,'err')}}
 function appendMsg(r,txt){const c=document.getElementById('messages'),d=document.createElement('div');d.className='msg msg-'+r;const tm=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});d.innerHTML=esc(txt)+'<div class="msg-time">'+tm+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
 
 async function loadSettings(){try{const r=await fetch('/api/settings'),d=await r.json();['zai_endpoint','zai_api_key','model','telegram_token','telegram_allow_id','workspace_root','max_history','max_turns','github_token','github_username','agent_name','language'].forEach(f=>{const e=document.getElementById('set-'+f);if(e&&d[f]){if(e.tagName==='SELECT')e.value=d[f];else e.value=d[f]}})}catch(e){}}
@@ -356,7 +386,7 @@ async function applyUpdate(){
 document.getElementById('chatInput').addEventListener('input',function(){this.style.height='52px';this.style.height=Math.min(this.scrollHeight,120)+'px'});
 
 // Init
-loadAppConfig().then(()=>{appendMsg('assistant',t('welcome'))});
+loadAppConfig().then(async()=>{updateSessionBadge();await loadChatSessions();await loadChatHistory(currentSessionId)});
 </script>
 </body></html>`
 }

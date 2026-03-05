@@ -50,8 +50,42 @@ func (r *Runtime) GetSession(id string) *Session {
 		return s
 	}
 	s := NewSession(id)
+	r.hydrateSessionHistory(s)
 	r.sessions[id] = s
 	return s
+}
+
+func (r *Runtime) hydrateSessionHistory(s *Session) {
+	msgs, err := r.store.GetRecentMessages(s.ID, r.cfg.MaxHistory*2)
+	if err != nil || len(msgs) == 0 {
+		return
+	}
+	for _, m := range msgs {
+		if m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
+			continue
+		}
+		s.History = append(s.History, planner.Message{Role: m.Role, Content: m.Content})
+	}
+}
+
+func (r *Runtime) NewSessionID(prefix string) string {
+	p := strings.TrimSpace(prefix)
+	if p == "" {
+		p = "session"
+	}
+	return fmt.Sprintf("%s-%d", p, time.Now().UnixNano())
+}
+
+func (r *Runtime) ListChatSessions(prefix string, limit int) ([]storage.ChatSessionSummary, error) {
+	return r.store.ListChatSessions(prefix, limit)
+}
+
+func (r *Runtime) GetChatHistory(sessionID string, limit int) ([]storage.StoredMessage, error) {
+	return r.store.GetSessionMessages(sessionID, limit)
+}
+
+func (r *Runtime) ResetSession(sessionID string) {
+	delete(r.sessions, sessionID)
 }
 
 func (r *Runtime) buildSystemPrompt(memoryCtx string) string {

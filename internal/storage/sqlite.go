@@ -18,6 +18,13 @@ type StoredMessage struct {
 	CreatedAt string
 }
 
+type ChatSessionSummary struct {
+	SessionID     string `json:"session_id"`
+	LastMessageAt string `json:"last_message_at"`
+	TotalMessages int    `json:"total_messages"`
+	LastMessage   string `json:"last_message"`
+}
+
 type ToolLog struct {
 	ID        int    `json:"id"`
 	SessionID string `json:"session_id"`
@@ -104,6 +111,79 @@ func (s *Storage) GetRecentMessages(sessionID string, limit int) ([]StoredMessag
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 	return msgs, nil
+}
+
+func (s *Storage) GetSessionMessages(sessionID string, limit int) ([]StoredMessage, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if limit > 0 {
+		rows, err = s.db.Query(`
+			SELECT session_id, role, content, created_at
+			FROM (
+				SELECT id, session_id, role, content, created_at
+				FROM messages
+				WHERE session_id = ?
+				ORDER BY id DESC
+				LIMIT ?
+			)
+			ORDER BY id ASC`, sessionID, limit)
+	} else {
+		rows, err = s.db.Query(`SELECT session_id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC`, sessionID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []StoredMessage
+	for rows.Next() {
+		var m StoredMessage
+		rows.Scan(&m.SessionID, &m.Role, &m.Content, &m.CreatedAt)
+		msgs = append(msgs, m)
+	}
+	return msgs, nil
+}
+
+func (s *Storage) ListChatSessions(prefix string, limit int) ([]ChatSessionSummary, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	like := "%"
+	if prefix != "" {
+		like = prefix + "%"
+	}
+
+	rows, err := s.db.Query(`
+		SELECT
+			m.session_id,
+			MAX(m.created_at) AS last_message_at,
+			COUNT(*) AS total_messages,
+			(
+				SELECT m2.content
+				FROM messages m2
+				WHERE m2.session_id = m.session_id
+				ORDER BY m2.id DESC
+				LIMIT 1
+			) AS last_message
+		FROM messages m
+		WHERE m.session_id LIKE ?
+		GROUP BY m.session_id
+		ORDER BY MAX(m.id) DESC
+		LIMIT ?`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []ChatSessionSummary
+	for rows.Next() {
+		var item ChatSessionSummary
+		rows.Scan(&item.SessionID, &item.LastMessageAt, &item.TotalMessages, &item.LastMessage)
+		sessions = append(sessions, item)
+	}
+	return sessions, nil
 }
 
 func (s *Storage) SearchOlderMessages(sessionID string, skip, limit int) ([]StoredMessage, error) {

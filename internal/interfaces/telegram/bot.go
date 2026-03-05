@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dev/agent-runtime/internal/runtime"
@@ -19,14 +20,15 @@ const progressFirstUpdate = 20 * time.Second
 const progressUpdateInterval = 30 * time.Second
 
 type Bot struct {
-	token   string
-	allowID string
-	rt      *runtime.Runtime
-	offset  int
+	token    string
+	allowID  string
+	rt       *runtime.Runtime
+	offset   int
+	sessions map[string]string
 }
 
 func NewBot(token, allowID string, rt *runtime.Runtime) *Bot {
-	return &Bot{token: token, allowID: allowID, rt: rt}
+	return &Bot{token: token, allowID: allowID, rt: rt, sessions: make(map[string]string)}
 }
 
 func (b *Bot) Start() {
@@ -72,13 +74,16 @@ func (b *Bot) pollUpdates() {
 				continue
 			}
 
-			if u.Message.Text == "/start" {
-				b.sendMessage(chatID, "Agentic Runtime Ready! Waiting for commands.")
-			} else if u.Message.Text != "" {
+			if u.Message.Text != "" {
+				if strings.HasPrefix(u.Message.Text, "/") {
+					b.handleCommand(chatID, u.Message.Text)
+					continue
+				}
+
 				// Show "typing..." while the agent processes the message
 				typingDone := b.startTypingLoop(chatID)
 				progressDone := b.startProgressLoop(chatID)
-				reply, _ := b.rt.ProcessMessage(chatID, u.Message.Text)
+				reply, _ := b.rt.ProcessMessage(b.getCurrentSession(chatID), u.Message.Text)
 				close(typingDone)   // stop typing indicator
 				close(progressDone) // stop progress messages
 				if len(reply) > 4000 {
@@ -87,6 +92,94 @@ func (b *Bot) pollUpdates() {
 				b.sendMessage(chatID, reply)
 			}
 		}
+	}
+}
+
+func (b *Bot) getCurrentSession(chatID string) string {
+	if sid, ok := b.sessions[chatID]; ok && sid != "" {
+		return sid
+	}
+	// Legacy-compatible default session id.
+	b.sessions[chatID] = chatID
+	return chatID
+}
+
+func (b *Bot) newSession(chatID string) string {
+	sid := b.rt.NewSessionID("tg-" + chatID)
+	b.sessions[chatID] = sid
+	b.rt.GetSession(sid)
+	return sid
+}
+
+func (b *Bot) handleCommand(chatID, text string) {
+	parts := strings.Fields(strings.TrimSpace(text))
+	if len(parts) == 0 {
+		return
+	}
+	cmd := strings.ToLower(parts[0])
+
+	switch cmd {
+	case "/start":
+		b.sendMessage(chatID, "Agentic Runtime ready. Use /help to see available commands.")
+	case "/help":
+		b.sendMessage(chatID, strings.Join([]string{
+			"Available commands:",
+			"/new - start a new chat session",
+			"/history - list your recent sessions",
+			"/use <session_id> - switch to a previous session",
+			"/session - show current session id",
+			"/help - show this message",
+		}, "\n"))
+	case "/new":
+		sid := b.newSession(chatID)
+		b.sendMessage(chatID, fmt.Sprintf("Started a new chat session: %s", sid))
+	case "/session":
+		b.sendMessage(chatID, "Current session: "+b.getCurrentSession(chatID))
+	case "/history":
+		prefix := "tg-" + chatID + "-"
+		sessions, err := b.rt.ListChatSessions(prefix, 10)
+		if err != nil {
+			b.sendMessage(chatID, "Failed to load history.")
+			return
+		}
+		if len(sessions) == 0 {
+			b.sendMessage(chatID, "No previous sessions found. Use /new to start one.")
+			return
+		}
+		current := b.getCurrentSession(chatID)
+		var out strings.Builder
+		out.WriteString("Recent sessions:\n")
+		for _, s := range sessions {
+			marker := " "
+			if s.SessionID == current {
+				marker = "*"
+			}
+			preview := strings.TrimSpace(s.LastMessage)
+			if len(preview) > 48 {
+				preview = preview[:48] + "..."
+			}
+			out.WriteString(fmt.Sprintf("%s %s\n", marker, s.SessionID))
+			if preview != "" {
+				out.WriteString("  " + preview + "\n")
+			}
+		}
+		out.WriteString("Use /use <session_id> to continue an older chat.")
+		b.sendMessage(chatID, out.String())
+	case "/use":
+		if len(parts) < 2 {
+			b.sendMessage(chatID, "Usage: /use <session_id>")
+			return
+		}
+		target := strings.TrimSpace(parts[1])
+		if !strings.HasPrefix(target, "tg-"+chatID+"-") && target != chatID {
+			b.sendMessage(chatID, "Invalid session id for this chat.")
+			return
+		}
+		b.sessions[chatID] = target
+		b.rt.GetSession(target)
+		b.sendMessage(chatID, "Switched to session: "+target)
+	default:
+		b.sendMessage(chatID, "Unknown command. Use /help.")
 	}
 }
 

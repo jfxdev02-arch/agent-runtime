@@ -38,6 +38,9 @@ func (s *Server) SetConfig(agentName, language string) {
 func (s *Server) Start() error {
 	http.HandleFunc("/", s.handleIndex)
 	http.HandleFunc("/api/chat", s.handleChat)
+	http.HandleFunc("/api/chat/new", s.handleNewChat)
+	http.HandleFunc("/api/chat/history", s.handleChatHistory)
+	http.HandleFunc("/api/chats", s.handleChats)
 	http.HandleFunc("/api/logs", s.handleLogs)
 	http.HandleFunc("/api/status", s.handleStatus)
 	http.HandleFunc("/api/settings", s.handleSettings)
@@ -75,7 +78,72 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, _ := s.rt.ProcessMessage(req.SessionID, req.Message)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"reply": reply})
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply, "session_id": req.SessionID})
+}
+
+func (s *Server) handleNewChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		Prefix string `json:"prefix"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	prefix := strings.TrimSpace(req.Prefix)
+	if prefix == "" {
+		prefix = "web"
+	}
+	sessionID := s.rt.NewSessionID(prefix)
+	// Ensure session exists in memory even before first user message.
+	s.rt.GetSession(sessionID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"session_id": sessionID})
+}
+
+func (s *Server) handleChatHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	limit := 0
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		limit, _ = strconv.Atoi(q)
+	}
+	history, err := s.rt.GetChatHistory(sessionID, limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
+func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	limit := 30
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			limit = n
+		}
+	}
+	prefix := strings.TrimSpace(r.URL.Query().Get("prefix"))
+	sessions, err := s.rt.ListChatSessions(prefix, limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sessions)
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
