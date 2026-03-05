@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dev/agent-runtime/internal/config"
 	"github.com/dev/agent-runtime/internal/memory"
@@ -23,6 +24,13 @@ type Runtime struct {
 	mem      *memory.MemoryAgent
 	toolDefs []planner.ToolDefinition
 	sessions map[string]*Session
+}
+
+type loopLimits struct {
+	deadline       time.Time
+	toolCalls      int
+	lastToolChain  string
+	repeatedChains int
 }
 
 func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry, llm *planner.Planner) *Runtime {
@@ -75,6 +83,7 @@ func (r *Runtime) trimHistory(s *Session) {
 // ProcessMessage is the main entry point called by Web/Telegram interfaces
 func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 	s := r.GetSession(sessionID)
+	limits := r.newLoopLimits()
 
 	// Handle pending confirmation for high-risk tools
 	if s.AwaitingConfirmation {
@@ -114,16 +123,18 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 	messages = append(messages, s.History...)
 
 	// Agentic loop: keep calling LLM until it stops requesting tools
-	return r.agenticLoop(s, messages, 0)
+	return r.agenticLoop(s, messages, 0, limits)
 }
 
 // agenticLoop calls the LLM, handles tool calls, feeds results back, repeats
-func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int) (string, bool) {
+func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int, limits *loopLimits) (string, bool) {
+	if r.isTimedOut(limits) {
+		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+	}
+
 	if depth >= r.cfg.MaxTurns {
-		summary := fmt.Sprintf("Turn limit (%d) reached. All executed actions have been saved.", r.cfg.MaxTurns)
-		s.History = append(s.History, planner.Message{Role: "assistant", Content: summary})
-		r.store.LogMessage(s.ID, "assistant", summary)
-		return summary, false
+		summary := fmt.Sprintf("Turn limit (%d) reached. Stopping to avoid tool loops.", r.cfg.MaxTurns)
+		return r.finishWithMessage(s, summary), false
 	}
 
 	resp, err := r.llm.Call(messages, r.toolDefs)
@@ -133,10 +144,22 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int)
 
 	// No tool calls: LLM gave a direct text response
 	if len(resp.ToolCalls) == 0 {
+		limits.lastToolChain = ""
+		limits.repeatedChains = 0
 		text := resp.Content
-		s.History = append(s.History, planner.Message{Role: "assistant", Content: text})
-		r.store.LogMessage(s.ID, "assistant", text)
-		return text, false
+		return r.finishWithMessage(s, text), false
+	}
+
+	chain := toolChainSignature(resp.ToolCalls)
+	if chain == limits.lastToolChain {
+		limits.repeatedChains++
+	} else {
+		limits.lastToolChain = chain
+		limits.repeatedChains = 1
+	}
+	if limits.repeatedChains >= r.cfg.MaxToolRepeats {
+		msg := fmt.Sprintf("Detected repeated tool loop (%d identical tool rounds). Stopping for safety.", limits.repeatedChains)
+		return r.finishWithMessage(s, msg), false
 	}
 
 	// LLM requested tool calls — check for high-risk ones that need approval
@@ -162,7 +185,7 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int)
 	}
 
 	// All tools are LOW risk — execute immediately
-	return r.executeToolCalls(s, messages, resp, depth)
+	return r.executeToolCalls(s, messages, resp, depth, limits)
 }
 
 // executeApprovedToolCalls runs after user confirms
@@ -180,11 +203,15 @@ func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
 	s.PendingToolCalls = nil
 	s.PendingAssistantMsg = nil
 
-	return r.executeToolCalls(s, messages, resp, 0)
+	return r.executeToolCalls(s, messages, resp, 0, r.newLoopLimits())
 }
 
 // executeToolCalls runs the actual tools, sends results back to LLM
-func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int) (string, bool) {
+func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int, limits *loopLimits) (string, bool) {
+	if r.isTimedOut(limits) {
+		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+	}
+
 	// Add the assistant's message (with tool_calls) to history
 	s.History = append(s.History, *resp)
 	messages = append(messages, *resp)
@@ -193,6 +220,15 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 
 	// Execute each tool call
 	for _, tc := range resp.ToolCalls {
+		if r.cfg.MaxToolCalls > 0 && limits.toolCalls >= r.cfg.MaxToolCalls {
+			msg := fmt.Sprintf("Tool call limit reached (%d). Stopping to avoid loops.", r.cfg.MaxToolCalls)
+			return r.finishWithMessage(s, msg), false
+		}
+		if r.isTimedOut(limits) {
+			return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+		}
+		limits.toolCalls++
+
 		tool, err := r.registry.Get(tc.Function.Name)
 
 		var output string
@@ -231,5 +267,37 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 	}
 
 	// Call LLM again with tool results — it may want more tools or give final answer
-	return r.agenticLoop(s, messages, depth+1)
+	return r.agenticLoop(s, messages, depth+1, limits)
+}
+
+func (r *Runtime) finishWithMessage(s *Session, text string) string {
+	s.History = append(s.History, planner.Message{Role: "assistant", Content: text})
+	r.store.LogMessage(s.ID, "assistant", text)
+	return text
+}
+
+func (r *Runtime) newLoopLimits() *loopLimits {
+	limits := &loopLimits{}
+	if r.cfg.MaxRunSeconds > 0 {
+		limits.deadline = time.Now().Add(time.Duration(r.cfg.MaxRunSeconds) * time.Second)
+	}
+	return limits
+}
+
+func (r *Runtime) isTimedOut(limits *loopLimits) bool {
+	if limits == nil || limits.deadline.IsZero() {
+		return false
+	}
+	return time.Now().After(limits.deadline)
+}
+
+func toolChainSignature(toolCalls []planner.ToolCall) string {
+	var sb strings.Builder
+	for _, tc := range toolCalls {
+		sb.WriteString(tc.Function.Name)
+		sb.WriteString("|")
+		sb.WriteString(strings.TrimSpace(tc.Function.Arguments))
+		sb.WriteString(";")
+	}
+	return sb.String()
 }

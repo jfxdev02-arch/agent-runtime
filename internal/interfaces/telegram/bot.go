@@ -15,12 +15,14 @@ import (
 // typingInterval defines how often to resend the "typing" action.
 // Telegram's indicator expires after ~5 seconds, so we refresh every 4.
 const typingInterval = 4 * time.Second
+const progressFirstUpdate = 20 * time.Second
+const progressUpdateInterval = 30 * time.Second
 
 type Bot struct {
-	token    string
-	allowID  string
-	rt       *runtime.Runtime
-	offset   int
+	token   string
+	allowID string
+	rt      *runtime.Runtime
+	offset  int
 }
 
 func NewBot(token, allowID string, rt *runtime.Runtime) *Bot {
@@ -74,9 +76,11 @@ func (b *Bot) pollUpdates() {
 				b.sendMessage(chatID, "Agentic Runtime Ready! Waiting for commands.")
 			} else if u.Message.Text != "" {
 				// Show "typing..." while the agent processes the message
-				done := b.startTypingLoop(chatID)
+				typingDone := b.startTypingLoop(chatID)
+				progressDone := b.startProgressLoop(chatID)
 				reply, _ := b.rt.ProcessMessage(chatID, u.Message.Text)
-				close(done) // stop the typing indicator
+				close(typingDone)   // stop typing indicator
+				close(progressDone) // stop progress messages
 				if len(reply) > 4000 {
 					reply = reply[:4000] + "\n...[TRUNCATED]"
 				}
@@ -115,6 +119,34 @@ func (b *Bot) startTypingLoop(chatID string) chan struct{} {
 				return
 			case <-ticker.C:
 				b.sendChatAction(chatID, "typing")
+			}
+		}
+	}()
+	return done
+}
+
+// startProgressLoop sends periodic progress updates for long-running requests.
+func (b *Bot) startProgressLoop(chatID string) chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		first := time.NewTimer(progressFirstUpdate)
+		defer first.Stop()
+
+		select {
+		case <-done:
+			return
+		case <-first.C:
+			b.sendMessage(chatID, "Still working on your request. I will send the result as soon as it is ready.")
+		}
+
+		ticker := time.NewTicker(progressUpdateInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				b.sendMessage(chatID, "Processing is still in progress. Thanks for waiting.")
 			}
 		}
 	}()
