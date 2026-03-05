@@ -38,9 +38,38 @@ func (b *Bot) Start() {
 		return
 	}
 	log.Println("Starting Telegram bot polling...")
+	// On startup, discard any pending updates to avoid re-processing old messages
+	// after a service restart. We fetch with offset=-1 to get the last update,
+	// then set our offset past it.
+	b.discardPendingUpdates()
 	for {
 		b.pollUpdates()
 		time.Sleep(2 * time.Second)
+	}
+}
+
+// discardPendingUpdates fetches the latest pending update and advances the
+// offset past it, so old messages are not re-processed after a restart.
+func (b *Bot) discardPendingUpdates() {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=-1&timeout=0", b.token)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("[telegram] Failed to discard pending updates: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Ok     bool `json:"ok"`
+		Result []struct {
+			UpdateID int `json:"update_id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Ok && len(result.Result) > 0 {
+		b.offset = result.Result[len(result.Result)-1].UpdateID + 1
+		log.Printf("[telegram] Discarded pending updates, offset set to %d", b.offset)
+	} else {
+		log.Println("[telegram] No pending updates to discard.")
 	}
 }
 
@@ -77,16 +106,25 @@ func (b *Bot) pollUpdates() {
 
 			if u.Message.Text != "" {
 				if strings.HasPrefix(u.Message.Text, "/") {
+					log.Printf("[telegram] Command from chat=%s: %s", chatID, u.Message.Text)
 					b.handleCommand(chatID, u.Message.Text)
 					continue
 				}
 
+				sid := b.getCurrentSession(chatID)
+				log.Printf("[telegram] Message from chat=%s session=%s: %s", chatID, sid, u.Message.Text)
+
 				// Show "typing..." while the agent processes the message
+				start := time.Now()
 				typingDone := b.startTypingLoop(chatID)
 				progressDone := b.startProgressLoop(chatID)
-				reply, _ := b.rt.ProcessMessage(b.getCurrentSession(chatID), u.Message.Text)
+				reply, _ := b.rt.ProcessMessage(sid, u.Message.Text)
 				close(typingDone)   // stop typing indicator
 				close(progressDone) // stop progress messages
+				elapsed := time.Since(start)
+
+				log.Printf("[telegram] Reply to chat=%s session=%s (took %s, %d chars)", chatID, sid, elapsed.Round(time.Millisecond), len(reply))
+
 				if len(reply) > 4000 {
 					reply = reply[:4000] + "\n...[TRUNCATED]"
 				}

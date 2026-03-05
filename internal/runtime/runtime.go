@@ -131,6 +131,7 @@ func (r *Runtime) trimHistory(s *Session) {
 
 // ProcessMessage is the main entry point called by Web/Telegram interfaces
 func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
+	log.Printf("[runtime] ProcessMessage session=%s msg=%q", sessionID, truncateLog(userMessage, 100))
 	s := r.GetSession(sessionID)
 	limits := r.newRunLimits()
 
@@ -177,6 +178,9 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 
 // agenticLoop calls the LLM, handles tool calls, feeds results back, repeats
 func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int, limits *runLimits) (string, bool) {
+	log.Printf("[runtime] agenticLoop session=%s depth=%d/%d toolCalls=%d/%d",
+		s.ID, depth, r.cfg.MaxTurns, limits.toolCalls, r.cfg.MaxToolCalls)
+
 	if r.isTimedOut(limits) {
 		log.Printf("[session=%s] Global timeout reached (%ds). Stopping.", s.ID, r.cfg.MaxRunSeconds)
 		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
@@ -196,11 +200,14 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 	// No tool calls: LLM gave a direct text response
 	if len(resp.ToolCalls) == 0 {
 		text := resp.Content
+		log.Printf("[runtime] LLM final response session=%s depth=%d len=%d", s.ID, depth, len(text))
 		return r.finishWithMessage(s, text), false
 	}
 
 	// LLM requested tool calls — check for high-risk ones that need approval
+	log.Printf("[runtime] LLM requested %d tool call(s) session=%s depth=%d", len(resp.ToolCalls), s.ID, depth)
 	for _, tc := range resp.ToolCalls {
+		log.Printf("[runtime]   tool=%s args=%s", tc.Function.Name, truncateLog(tc.Function.Arguments, 120))
 		tool, err := r.registry.Get(tc.Function.Name)
 		if err != nil {
 			continue
@@ -375,4 +382,13 @@ func (r *Runtime) isTimedOut(limits *runLimits) bool {
 		return false
 	}
 	return time.Now().After(limits.deadline)
+}
+
+// truncateLog shortens a string for logging purposes.
+func truncateLog(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }
