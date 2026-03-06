@@ -12,10 +12,10 @@ type Storage struct {
 }
 
 type StoredMessage struct {
-	SessionID string
-	Role      string
-	Content   string
-	CreatedAt string
+	SessionID string `json:"session_id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
 }
 
 type ChatSessionSummary struct {
@@ -184,6 +184,15 @@ func (s *Storage) ListChatSessions(prefix string, limit int) ([]ChatSessionSumma
 		sessions = append(sessions, item)
 	}
 	return sessions, nil
+}
+
+func (s *Storage) DeleteChatSession(sessionID string) error {
+	_, err := s.db.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("DELETE FROM tool_logs WHERE session_id = ?", sessionID)
+	return err
 }
 
 func (s *Storage) SearchOlderMessages(sessionID string, skip, limit int) ([]StoredMessage, error) {

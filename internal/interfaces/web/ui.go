@@ -43,6 +43,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
 .chat-session-id{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3);margin-bottom:4px}
 .chat-session-msg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-session-empty{font-size:12px;color:var(--t3);padding:12px;text-align:center}
+.chat-session{position:relative}
+.chat-del{position:absolute;top:8px;right:8px;width:22px;height:22px;border:none;background:transparent;color:var(--t3);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;opacity:0;transition:var(--tr)}
+.chat-session:hover .chat-del{opacity:1}
+.chat-del:hover{background:rgba(239,68,68,.2);color:var(--err)}
 .msgs{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:16px}
 .msg{max-width:80%;padding:14px 18px;border-radius:16px;font-size:14px;line-height:1.6;animation:fadeIn .3s ease;word-wrap:break-word;white-space:pre-wrap}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -351,7 +355,18 @@ async function sendMsg(){const i=document.getElementById('chatInput'),txt=i.valu
 
 function updateSessionBadge(){document.getElementById('chatSessionBadge').textContent=t('session')+': '+currentSessionId}
 
-function renderChatSessions(list){const c=document.getElementById('chatSessions');if(!list||!list.length){c.innerHTML='<div class="chat-session-empty">'+t('chatHistoryEmpty')+'</div>';return}c.innerHTML=list.map(s=>{const sid=(s.session_id||'').replace(/'/g,'');const msg=escPre((s.last_message||'').slice(0,80));const active=sid===currentSessionId?' active':'';return '<button class="chat-session'+active+'" onclick="openSession(\''+sid+'\')"><div class="chat-session-id">'+escPre(sid)+'</div><div class="chat-session-msg">'+(msg||'-')+'</div></button>'}).join('')}
+function renderChatSessions(list){const c=document.getElementById('chatSessions');if(!list||!list.length){c.innerHTML='<div class="chat-session-empty">'+t('chatHistoryEmpty')+'</div>';return}c.innerHTML=list.map(s=>{const sid=(s.session_id||'').replace(/'/g,'');const msg=escPre((s.last_message||'').slice(0,80));const active=sid===currentSessionId?' active':'';return '<div class="chat-session'+active+'" onclick="openSession(\''+sid+'\')">'+'<button class="chat-del" onclick="event.stopPropagation();deleteChat(\''+sid+'\')" title="Delete chat">🗑</button>'+'<div class="chat-session-id">'+escPre(sid)+'</div><div class="chat-session-msg">'+(msg||'-')+'</div></div>'}).join('')}
+
+async function deleteChat(sessionID){
+  if(!confirm('Delete this chat? This cannot be undone.'))return;
+  try{
+    const r=await fetch('/api/chat/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sessionID})});
+    const d=await r.json();
+    if(d.error){toast('Error: '+d.error,'err');return}
+    toast('Chat deleted');
+    if(sessionID===currentSessionId){await newChat()}else{await loadChatSessions()}
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 
 async function loadChatSessions(){try{const r=await fetch('/api/chats?prefix=web-&limit=40');const sessions=await r.json();renderChatSessions(sessions)}catch(e){}}
 

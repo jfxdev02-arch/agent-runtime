@@ -142,6 +142,12 @@ func (r *Runtime) ResetSession(sessionID string) {
 	delete(r.sessions, sessionID)
 }
 
+// DeleteSession removes a session from memory and deletes all its messages from storage.
+func (r *Runtime) DeleteSession(sessionID string) error {
+	delete(r.sessions, sessionID)
+	return r.store.DeleteChatSession(sessionID)
+}
+
 // GetSessionSettings returns the settings for a session.
 func (r *Runtime) GetSessionSettings(sessionID string) SessionSettings {
 	s := r.GetSession(sessionID)

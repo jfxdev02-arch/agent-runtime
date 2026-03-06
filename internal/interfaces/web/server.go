@@ -42,6 +42,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/chat/history", s.handleChatHistory)
 	http.HandleFunc("/api/chat/compact", s.handleChatCompact)
 	http.HandleFunc("/api/chats", s.handleChats)
+	http.HandleFunc("/api/chat/delete", s.handleChatDelete)
 	http.HandleFunc("/api/session/settings", s.handleSessionSettings)
 	http.HandleFunc("/api/providers", s.handleProviders)
 	http.HandleFunc("/api/providers/status", s.handleProviderStatus)
@@ -128,6 +129,29 @@ func (s *Server) handleChatHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(history)
+}
+
+func (s *Server) handleChatDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	if err := s.rt.DeleteSession(req.SessionID); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": req.SessionID})
 }
 
 func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
