@@ -8,7 +8,11 @@ A lightweight, autonomous agentic runtime written in Go, designed to run on low-
 
 - **🧠 Multi-Turn Agentic Loop** — Executes tools, feeds results back to the LLM, and loops until the task is done
 - **🔧 Native Tool Calling** — Uses the LLM's function calling API (OpenAI-compatible)
-- **💬 Web Interface** — Full dashboard with Chat, Projects, Settings, Logs, and System Status
+- **� Multi-Model Failover** — Configure multiple LLM providers with automatic failover and priority-based routing
+- **🎛️ Session Management** — Per-session model switch, think levels (off/low/medium/high), verbose mode, session compaction
+- **🤝 Agent-to-Agent** — `sessions_list`, `sessions_history`, `sessions_send` tools for inter-session coordination
+- **🚀 Onboarding Wizard** — Interactive 4-step setup wizard with real-time LLM connection validation
+- **💬 Web Interface** — Full dashboard with Chat, Projects, Providers, Settings, Logs, and System Status
 - **📁 Project Management** — Auto-scan workspace, Git operations (commit/push/pull/branch), project notes
 - **📱 Telegram Bot** — Interactive chat via Telegram
 - **🧩 Memory Agent** — Retrieves relevant context from past conversations
@@ -32,17 +36,23 @@ agent-runtime/
 │   │       ├── server.go          # HTTP server + API endpoints
 │   │       └── ui.go              # Embedded web UI
 │   ├── memory/agent.go            # Memory Agent (RAG via LLM)
-│   ├── planner/client.go          # LLM client with native tool calling
+│   ├── planner/
+│   │   ├── client.go              # LLM client with native tool calling
+│   │   └── provider.go            # Multi-model provider management & failover
 │   ├── runtime/
 │   │   ├── runtime.go             # Core agentic engine
-│   │   └── session.go             # Session management
+│   │   ├── session.go             # Session management & per-session settings
+│   │   ├── loop_detection.go      # Loop detection & circuit breaker
+│   │   └── loop_detection_test.go # Loop detection tests
 │   ├── storage/sqlite.go          # SQLite persistence
 │   └── tools/
 │       ├── registry.go            # Tool interface & registry
 │       ├── echo.go                # Echo tool (testing)
 │       ├── shell.go               # Shell execution (bash -c)
 │       ├── workspace.go           # File listing & reading
-│       └── files.go               # File write/patch/delete
+│       ├── files.go               # File write/patch/delete
+│       ├── delegate.go            # Sub-agent delegation
+│       └── sessions.go            # Agent-to-agent coordination tools
 ├── prompts/
 │   ├── soul.md                    # Agent identity & capabilities
 │   ├── rules.md                   # Behavior rules
@@ -146,8 +156,9 @@ All configuration is via **environment variables**:
 | `LOOP_GLOBAL_AT` | ❌ | `30` | Global breaker threshold for identical no-progress results |
 | `AGENT_NAME` | ❌ | `Cronos` | Agent display name |
 | `LANGUAGE` | ❌ | `en` | UI language (`en`, `pt-BR`, `es`, `fr`, `de`, `ja`, `zh`) |
+| `MODELS` | ❌ | — | Multi-model providers (see below) |
 
-### Example
+### Example (Single Provider)
 
 ```bash
 export ZAI_API_KEY="your-api-key"
@@ -160,6 +171,32 @@ export LANGUAGE="en"
 ./agent-runtime
 ```
 
+### Multi-Model Configuration
+
+Configure multiple providers with automatic failover using the `MODELS` env var.
+
+**Format:** `id:name:endpoint:key:model:priority` separated by `||`
+
+```bash
+export MODELS="zai:ZhipuAI:https://api.z.ai/v1/chat/completions:sk-xxx:glm-5:1||openai:OpenAI:https://api.openai.com/v1/chat/completions:sk-yyy:gpt-4o:2||ollama:Ollama:http://localhost:11434/v1/chat/completions::llama3:3"
+```
+
+| Field | Description |
+|---|---|
+| `id` | Unique identifier for the provider |
+| `name` | Display name |
+| `endpoint` | OpenAI-compatible API endpoint |
+| `key` | API key (empty for local models) |
+| `model` | Model name to use |
+| `priority` | Lower = preferred. Higher priority providers are used as fallback |
+
+**Failover behavior:**
+- Providers are tried in priority order
+- On failure, automatic failover to the next available provider
+- Exponential backoff cooldown (30s → 60s → 120s → max 5min)
+- Legacy `ZAI_ENDPOINT`/`ZAI_API_KEY` is always added as fallback (priority 999)
+- Per-session model override via Web UI
+
 ---
 
 ## 🏃 Usage
@@ -169,11 +206,18 @@ export LANGUAGE="en"
 Open `http://<host>:8080` in your browser.
 
 Pages:
-- **💬 Chat** — Converse with the agent
+- **💬 Chat** — Converse with the agent (with think level, model selector, verbose toggle, compact button)
 - **📁 Projects** — Manage projects, Git operations, notes
+- **🔌 Providers** — View configured model providers, health status, and failover info
 - **⚙️ Settings** — Configure API keys, tokens, model, language
 - **📋 Logs** — Tool execution history with expandable details
 - **📊 Status** — System health dashboard
+
+**Chat Controls:**
+- **Think Level** — Set reasoning depth: Off, Low, Medium, High
+- **Model Selector** — Switch the LLM model for the current session
+- **Verbose** — Toggle detailed tool execution output
+- **Compact** — Summarize conversation history via LLM to reduce context size
 
 ### Telegram
 
@@ -192,9 +236,28 @@ Send messages directly to your bot. The agent processes and responds autonomousl
 | `GET` | `/api/projects/git?id=N` | Git info for project |
 | `POST` | `/api/projects/git/action` | Git action (commit/push/pull/branch) |
 | `GET/POST` | `/api/settings` | Read/write settings |
+| `POST` | `/api/chat/compact` | Compact session history. Body: `{"session_id": "..."}` |
+| `GET/POST` | `/api/session/settings` | Read/update per-session settings (model, think level, verbose) |
+| `GET` | `/api/providers` | List configured model providers |
+| `GET` | `/api/providers/status` | Provider health status with failover info |
+| `POST` | `/api/onboarding/validate` | Test LLM connection. Body: `{"endpoint": "...", "api_key": "...", "model": "..."}` |
 | `GET` | `/api/status` | System status |
 | `GET` | `/api/logs` | Recent tool logs |
 | `GET` | `/api/app-config` | Agent name, language, version |
+
+---
+
+## 🤝 Agent-to-Agent Coordination
+
+Sessions can communicate with each other using built-in tools:
+
+| Tool | Description |
+|---|---|
+| `sessions_list` | List all active sessions with metadata (message count, model, status) |
+| `sessions_history` | Fetch the conversation transcript of another session |
+| `sessions_send` | Send a message to another session and receive its reply |
+
+This enables multi-agent workflows where one session can delegate tasks to another, check on progress, or share context.
 
 ---
 
