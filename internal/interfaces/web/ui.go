@@ -110,13 +110,19 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
   <div class="logo" id="logoLetter">A</div>
   <button class="nav-btn active" onclick="showPage('chat',this)" title="Chat">💬</button>
   <button class="nav-btn" onclick="showPage('projects',this)" title="Projects">📁</button>
+  <button class="nav-btn" onclick="showPage('providers',this)" title="Providers">🔌</button>
   <button class="nav-btn" onclick="showPage('settings',this)" title="Settings">⚙️</button>
   <button class="nav-btn" onclick="showPage('logs',this)" title="Logs">📋</button>
   <button class="nav-btn" onclick="showPage('status',this)" title="Status">📊</button>
 </aside>
 <main class="main">
   <div id="page-chat" class="page active">
-    <div class="hdr"><h1 id="chatTitle">Chat</h1><span class="badge badge-on" id="chatSessionBadge">● Online</span></div>
+    <div class="hdr"><h1 id="chatTitle">Chat</h1><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-on" id="chatSessionBadge">● Online</span>
+      <select id="chatThinkLevel" onchange="updateSessionSetting()" style="background:var(--bg3);color:var(--t2);border:1px solid var(--brd);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer" title="Think Level"><option value="off">🧠 Off</option><option value="low">🧠 Low</option><option value="medium" selected>🧠 Medium</option><option value="high">🧠 High</option></select>
+      <select id="chatModelSelect" onchange="updateSessionSetting()" style="background:var(--bg3);color:var(--t2);border:1px solid var(--brd);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer" title="Model"><option value="">Default</option></select>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--t3);cursor:pointer" title="Verbose Mode"><input type="checkbox" id="chatVerbose" onchange="updateSessionSetting()"> Verbose</label>
+      <button class="btn btn-ghost btn-sm" onclick="compactSession()" title="Compact session (summarize history)">📦 Compact</button>
+    </div></div>
     <div class="chat-layout">
       <aside class="chat-sidebar">
         <div class="chat-sidebar-h"><button class="btn btn-primary" style="width:100%" id="btnNewChat" onclick="newChat()">+ New Chat</button></div>
@@ -182,6 +188,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
     <div class="hdr"><h1 id="statTitle">System Status</h1><button class="btn btn-ghost" onclick="loadStatus()" id="btnRefreshStatus">Refresh</button></div>
     <div class="scroll" id="statusC"></div>
   </div>
+  <div id="page-providers" class="page">
+    <div class="hdr"><h1 id="provTitle">Model Providers</h1><button class="btn btn-ghost" onclick="loadProviderStatus()" id="btnRefreshProv">Refresh</button></div>
+    <div class="scroll" id="provC">
+      <div class="sec"><h2>Configured Providers</h2>
+        <p style="color:var(--t3);font-size:13px;margin-bottom:16px">Set <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px">MODELS</code> env var to configure multiple providers with automatic failover.<br>
+        Format: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px">id:name:endpoint:key:model:priority||...</code></p>
+        <div id="providerList"></div>
+      </div>
+    </div>
+  </div>
 </main>
 <div class="modal-bg" id="projModal"><div class="modal">
   <div class="modal-hdr"><h2 id="modalTitle">Project</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
@@ -237,6 +253,50 @@ body{font-family:'Inter',sans-serif;background:var(--bg1);color:var(--t1);height
     <button class="btn btn-primary" onclick="addProject()" style="margin-top:12px" id="btnAddProj">Add</button>
   </div>
 </div></div>
+<div class="modal-bg" id="onboardModal"><div class="modal" style="max-width:600px">
+  <div class="modal-hdr"><h2>🚀 Welcome — Setup Wizard</h2><button class="modal-close" onclick="closeOnboarding()">&times;</button></div>
+  <div class="modal-body">
+    <div id="onb-step-1" class="onb-step">
+      <h3 style="margin-bottom:12px;color:var(--ac)">Step 1: Agent Identity</h3>
+      <p style="color:var(--t2);margin-bottom:16px;font-size:13px">Give your agent a name and choose the interface language.</p>
+      <div class="card"><label>Agent Name</label><input type="text" id="onb-name" placeholder="Cronos" value="Cronos"></div>
+      <div class="card"><label>Language</label><select id="onb-lang"><option value="en">English</option><option value="pt-BR">Português (Brasil)</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="zh">中文</option></select></div>
+      <button class="btn btn-primary" onclick="onbNext(2)" style="margin-top:12px">Next →</button>
+    </div>
+    <div id="onb-step-2" class="onb-step" style="display:none">
+      <h3 style="margin-bottom:12px;color:var(--ac)">Step 2: LLM Provider</h3>
+      <p style="color:var(--t2);margin-bottom:16px;font-size:13px">Configure your primary LLM API. Any OpenAI-compatible endpoint works (OpenAI, Anthropic, Together, ZhipuAI, Ollama, etc.).</p>
+      <div class="card"><label>API Endpoint</label><input type="text" id="onb-endpoint" placeholder="https://api.openai.com/v1/chat/completions"></div>
+      <div class="card"><label>API Key</label><input type="password" id="onb-apikey" placeholder="sk-..."></div>
+      <div class="card"><label>Model Name</label><input type="text" id="onb-model" placeholder="gpt-4o" value="gpt-4o"></div>
+      <div id="onb-validate-result" style="display:none;margin-bottom:12px;padding:12px;border-radius:8px;font-size:13px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost" onclick="onbNext(1)">← Back</button>
+        <button class="btn btn-ghost" onclick="onbValidate()" id="onb-validate-btn">🔍 Test Connection</button>
+        <button class="btn btn-primary" onclick="onbNext(3)">Next →</button>
+      </div>
+    </div>
+    <div id="onb-step-3" class="onb-step" style="display:none">
+      <h3 style="margin-bottom:12px;color:var(--ac)">Step 3: Workspace</h3>
+      <p style="color:var(--t2);margin-bottom:16px;font-size:13px">Where should the agent work? This is the root directory for file operations and project scanning.</p>
+      <div class="card"><label>Workspace Root</label><input type="text" id="onb-workspace" placeholder="/home/user/projects" value="."></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost" onclick="onbNext(2)">← Back</button>
+        <button class="btn btn-primary" onclick="onbNext(4)">Next →</button>
+      </div>
+    </div>
+    <div id="onb-step-4" class="onb-step" style="display:none">
+      <h3 style="margin-bottom:12px;color:var(--ac)">Step 4: Telegram (Optional)</h3>
+      <p style="color:var(--t2);margin-bottom:16px;font-size:13px">Connect a Telegram bot to chat with your agent from anywhere. Skip if you only need the web interface.</p>
+      <div class="card"><label>Bot Token (from @BotFather)</label><input type="password" id="onb-tg-token" placeholder="123456:ABC-DEF..."></div>
+      <div class="card"><label>Your Telegram User ID</label><input type="text" id="onb-tg-id" placeholder="12345678"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost" onclick="onbNext(3)">← Back</button>
+        <button class="btn btn-primary" onclick="onbFinish()">✅ Finish Setup</button>
+      </div>
+    </div>
+  </div>
+</div></div>
 <script>
 let currentProj=null, appCfg={agent_name:'Agent',language:'en'};
 let currentSessionId='web-default';
@@ -284,7 +344,7 @@ async function loadAppConfig(){
   try{const r=await fetch('/api/app-config');appCfg=await r.json();applyI18n()}catch(e){}
 }
 
-function showPage(n,btn){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('page-'+n).classList.add('active');btn.classList.add('active');if(n==='logs')loadLogs();if(n==='status')loadStatus();if(n==='settings')loadSettings();if(n==='projects')loadProjects()}
+function showPage(n,btn){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('page-'+n).classList.add('active');btn.classList.add('active');if(n==='logs')loadLogs();if(n==='status')loadStatus();if(n==='settings')loadSettings();if(n==='projects')loadProjects();if(n==='providers')loadProviderStatus()}
 function toast(m,type='ok'){const d=document.createElement('div');d.className='toast toast-'+type;d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),3000)}
 
 async function sendMsg(){const i=document.getElementById('chatInput'),txt=i.value.trim();if(!txt)return;appendMsg('user',txt);i.value='';i.style.height='52px';const b=document.getElementById('sendBtn');b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:currentSessionId,message:txt})});const d=await r.json();currentSessionId=d.session_id||currentSessionId;updateSessionBadge();appendMsg('assistant',d.reply);loadChatSessions()}catch(e){appendMsg('assistant','Error: '+e.message)}b.disabled=false;b.innerHTML='➤'}
@@ -297,7 +357,7 @@ async function loadChatSessions(){try{const r=await fetch('/api/chats?prefix=web
 
 async function loadChatHistory(sessionID){try{const r=await fetch('/api/chat/history?session_id='+encodeURIComponent(sessionID));const msgs=await r.json();const c=document.getElementById('messages');c.innerHTML='';if(!msgs||!msgs.length){appendMsg('assistant',t('welcome'));return}msgs.forEach(m=>{if(m.role==='user'||m.role==='assistant'){appendMsg(m.role,m.content)}})}catch(e){appendMsg('assistant','Error: '+e.message)}}
 
-async function openSession(sessionID){currentSessionId=sessionID;updateSessionBadge();await loadChatHistory(sessionID);await loadChatSessions()}
+async function openSession(sessionID){currentSessionId=sessionID;updateSessionBadge();await loadChatHistory(sessionID);await loadChatSessions();await loadSessionSettings()}
 
 async function newChat(){try{const r=await fetch('/api/chat/new',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:'web'})});const d=await r.json();currentSessionId=d.session_id;updateSessionBadge();document.getElementById('messages').innerHTML='';appendMsg('assistant',t('welcome'));loadChatSessions()}catch(e){toast('Error: '+e.message,'err')}}
 function appendMsg(r,txt){const c=document.getElementById('messages'),d=document.createElement('div');d.className='msg msg-'+r;const tm=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});d.innerHTML=esc(txt)+'<div class="msg-time">'+tm+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
@@ -386,7 +446,127 @@ async function applyUpdate(){
 document.getElementById('chatInput').addEventListener('input',function(){this.style.height='52px';this.style.height=Math.min(this.scrollHeight,120)+'px'});
 
 // Init
-loadAppConfig().then(async()=>{updateSessionBadge();await loadChatSessions();await loadChatHistory(currentSessionId)});
+loadAppConfig().then(async()=>{updateSessionBadge();await loadChatSessions();await loadChatHistory(currentSessionId);await loadModelOptions();await loadSessionSettings();checkOnboarding()});
+
+// --- Session Settings ---
+async function loadModelOptions(){
+  try{
+    const r=await fetch('/api/providers');
+    const list=await r.json();
+    const sel=document.getElementById('chatModelSelect');
+    sel.innerHTML='<option value="">Default (failover)</option>';
+    if(list&&list.length){list.forEach(p=>{sel.innerHTML+='<option value="'+escPre(p.id)+'">'+escPre(p.name)+' ('+escPre(p.model)+')</option>'})}
+  }catch(e){}
+}
+
+async function loadSessionSettings(){
+  if(!currentSessionId)return;
+  try{
+    const r=await fetch('/api/session/settings?session_id='+encodeURIComponent(currentSessionId));
+    const s=await r.json();
+    if(s.model_id)document.getElementById('chatModelSelect').value=s.model_id;
+    if(s.think_level)document.getElementById('chatThinkLevel').value=s.think_level;
+    document.getElementById('chatVerbose').checked=!!s.verbose;
+  }catch(e){}
+}
+
+async function updateSessionSetting(){
+  if(!currentSessionId)return;
+  const body={
+    session_id:currentSessionId,
+    model_id:document.getElementById('chatModelSelect').value,
+    think_level:document.getElementById('chatThinkLevel').value,
+    verbose:document.getElementById('chatVerbose').checked
+  };
+  try{await fetch('/api/session/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}catch(e){}
+}
+
+async function compactSession(){
+  if(!currentSessionId)return;
+  if(!confirm('Compact this session? This will summarize the conversation history.'))return;
+  try{
+    const r=await fetch('/api/chat/compact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:currentSessionId})});
+    const d=await r.json();
+    if(d.error){toast('Compact failed: '+d.error,'err');return}
+    toast('Session compacted!');
+    await loadChatHistory(currentSessionId);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+// --- Providers ---
+async function loadProviderStatus(){
+  try{
+    const r=await fetch('/api/providers/status');
+    const list=await r.json();
+    const c=document.getElementById('providerList');
+    if(!list||!list.length){c.innerHTML='<div class="card" style="text-align:center;color:var(--t3)">No providers configured. Set MODELS env var or use the setup wizard.</div>';return}
+    c.innerHTML=list.map(p=>{
+      const avail=p.available?'<span class="badge badge-on">Available</span>':'<span class="badge badge-paused">Cooldown</span>';
+      const fails=p.failures>0?'<span style="color:var(--err);font-size:11px;margin-left:8px">'+p.failures+' failures</span>':'';
+      return '<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><strong>'+escPre(p.name||p.id)+'</strong> '+avail+fails+'</div><span class="badge badge-active">Priority '+p.priority+'</span></div><div style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:var(--t3)">Model: '+escPre(p.model)+' · Endpoint: '+escPre(p.endpoint||'')+'</div></div>'
+    }).join('');
+  }catch(e){}
+}
+
+// --- Onboarding Wizard ---
+async function checkOnboarding(){
+  try{
+    const r=await fetch('/api/settings');
+    const s=await r.json();
+    if(!s.zai_endpoint||s.zai_endpoint===''||s.zai_endpoint==='••••••••'){
+      document.getElementById('onboardModal').classList.add('show');
+    }
+  }catch(e){}
+}
+function closeOnboarding(){document.getElementById('onboardModal').classList.remove('show')}
+function onbNext(step){
+  document.querySelectorAll('.onb-step').forEach(s=>s.style.display='none');
+  document.getElementById('onb-step-'+step).style.display='block';
+}
+async function onbValidate(){
+  const btn=document.getElementById('onb-validate-btn');
+  const res=document.getElementById('onb-validate-result');
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Testing...';
+  res.style.display='block';res.style.background='var(--bg3)';res.style.borderColor='var(--brd)';res.textContent='Connecting...';
+  try{
+    const r=await fetch('/api/onboarding/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      endpoint:document.getElementById('onb-endpoint').value,
+      api_key:document.getElementById('onb-apikey').value,
+      model:document.getElementById('onb-model').value
+    })});
+    const d=await r.json();
+    if(d.model_ok){
+      res.style.background='rgba(16,185,129,.15)';res.style.color='var(--ok)';
+      res.textContent='✅ '+d.message;
+    }else if(d.auth_ok){
+      res.style.background='rgba(245,158,11,.15)';res.style.color='var(--warn)';
+      res.textContent='⚠️ '+d.message;
+    }else{
+      res.style.background='rgba(239,68,68,.15)';res.style.color='var(--err)';
+      res.textContent='❌ '+d.message;
+    }
+  }catch(e){res.style.background='rgba(239,68,68,.15)';res.style.color='var(--err)';res.textContent='❌ Error: '+e.message}
+  btn.disabled=false;btn.innerHTML='🔍 Test Connection';
+}
+async function onbFinish(){
+  const settings={
+    agent_name:document.getElementById('onb-name').value||'Cronos',
+    language:document.getElementById('onb-lang').value||'en',
+    zai_endpoint:document.getElementById('onb-endpoint').value,
+    zai_api_key:document.getElementById('onb-apikey').value,
+    model:document.getElementById('onb-model').value||'gpt-4o',
+    workspace_root:document.getElementById('onb-workspace').value||'.',
+    telegram_token:document.getElementById('onb-tg-token').value,
+    telegram_allow_id:document.getElementById('onb-tg-id').value
+  };
+  try{
+    await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)});
+    appCfg.agent_name=settings.agent_name;appCfg.language=settings.language;applyI18n();
+    closeOnboarding();
+    toast('Setup complete! 🎉');
+    await loadSettings();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 </script>
 </body></html>`
 }

@@ -40,7 +40,12 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/chat", s.handleChat)
 	http.HandleFunc("/api/chat/new", s.handleNewChat)
 	http.HandleFunc("/api/chat/history", s.handleChatHistory)
+	http.HandleFunc("/api/chat/compact", s.handleChatCompact)
 	http.HandleFunc("/api/chats", s.handleChats)
+	http.HandleFunc("/api/session/settings", s.handleSessionSettings)
+	http.HandleFunc("/api/providers", s.handleProviders)
+	http.HandleFunc("/api/providers/status", s.handleProviderStatus)
+	http.HandleFunc("/api/onboarding/validate", s.handleOnboardingValidate)
 	http.HandleFunc("/api/logs", s.handleLogs)
 	http.HandleFunc("/api/status", s.handleStatus)
 	http.HandleFunc("/api/settings", s.handleSettings)
@@ -357,6 +362,192 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	result := updater.ApplyUpdate(s.projectDir)
+	json.NewEncoder(w).Encode(result)
+}
+
+// --- Session Management ---
+
+func (s *Server) handleChatCompact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	summary, err := s.rt.CompactSession(req.SessionID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"summary": summary, "session_id": req.SessionID})
+}
+
+func (s *Server) handleSessionSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+		if sessionID == "" {
+			http.Error(w, "session_id is required", 400)
+			return
+		}
+		settings := s.rt.GetSessionSettings(sessionID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(settings)
+	case "POST":
+		var req struct {
+			SessionID  string `json:"session_id"`
+			ModelID    string `json:"model_id"`
+			ThinkLevel string `json:"think_level"`
+			Verbose    bool   `json:"verbose"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.SessionID == "" {
+			http.Error(w, "session_id is required", 400)
+			return
+		}
+		s.rt.UpdateSessionSettings(req.SessionID, rt.SessionSettings{
+			ModelID:    req.ModelID,
+			ThinkLevel: req.ThinkLevel,
+			Verbose:    req.Verbose,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// --- Providers ---
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	multi := s.rt.GetMultiPlanner()
+	providers := multi.ListProviders()
+	var list []map[string]interface{}
+	for _, p := range providers {
+		list = append(list, map[string]interface{}{
+			"id":       p.ID,
+			"name":     p.Name,
+			"model":    p.Model,
+			"priority": p.Priority,
+		})
+	}
+	if list == nil {
+		list = []map[string]interface{}{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
+func (s *Server) handleProviderStatus(w http.ResponseWriter, r *http.Request) {
+	multi := s.rt.GetMultiPlanner()
+	status := multi.ProviderStatus()
+	if status == nil {
+		status = []map[string]interface{}{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// --- Onboarding ---
+
+func (s *Server) handleOnboardingValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+
+	var req struct {
+		Endpoint string `json:"endpoint"`
+		APIKey   string `json:"api_key"`
+		Model    string `json:"model"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	result := map[string]interface{}{
+		"endpoint_ok": false,
+		"auth_ok":     false,
+		"model_ok":    false,
+		"message":     "",
+	}
+
+	if req.Endpoint == "" {
+		result["message"] = "Endpoint is required"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	result["endpoint_ok"] = true
+
+	// Test the connection with a simple message
+	model := req.Model
+	if model == "" {
+		model = "glm-5"
+	}
+
+	testBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "Say 'hello' in one word."},
+		},
+		"temperature": 0.1,
+	}
+	bodyJSON, _ := json.Marshal(testBody)
+
+	httpReq, err := http.NewRequest("POST", req.Endpoint, bytes.NewBuffer(bodyJSON))
+	if err != nil {
+		result["message"] = "Invalid endpoint URL: " + err.Error()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if req.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		result["message"] = "Connection failed: " + err.Error()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		result["endpoint_ok"] = true
+		result["message"] = "Authentication failed (HTTP " + fmt.Sprintf("%d", resp.StatusCode) + "). Check your API key."
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	result["auth_ok"] = true
+
+	if resp.StatusCode != 200 {
+		body := make([]byte, 500)
+		n, _ := resp.Body.Read(body)
+		result["message"] = fmt.Sprintf("API returned HTTP %d: %s", resp.StatusCode, string(body[:n]))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	result["model_ok"] = true
+	result["message"] = "Connection successful! Model " + model + " is responding."
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
 

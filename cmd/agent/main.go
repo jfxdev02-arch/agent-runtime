@@ -35,6 +35,11 @@ func main() {
 
 	rt := runtime.NewRuntime(cfg, store, reg, llm)
 
+	// Register sessions_* tools (agent-to-agent coordination)
+	reg.Register(tools.NewSessionsListTool(rt))
+	reg.Register(tools.NewSessionsHistoryTool(rt))
+	reg.Register(tools.NewSessionsSendTool(rt))
+
 	bot := telegram.NewBot(cfg.TelegramToken, cfg.TelegramAllowID, rt)
 	go bot.Start()
 

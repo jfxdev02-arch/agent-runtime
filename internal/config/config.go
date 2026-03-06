@@ -25,6 +25,8 @@ type Config struct {
 	MaxAgentDepth   int
 	AgentName       string
 	Language        string
+	// Multi-model: "id:name:endpoint:key:model:priority||..." or empty for legacy single-model
+	Models string
 }
 
 func LoadConfig() *Config {
@@ -49,6 +51,7 @@ func LoadConfig() *Config {
 		MaxAgentDepth:   getEnvInt("MAX_AGENT_DEPTH", 3),
 		AgentName:       getEnv("AGENT_NAME", "Cronos"),
 		Language:        getEnv("LANGUAGE", "en"),
+		Models:          getEnv("MODELS", ""),
 	}
 }
 

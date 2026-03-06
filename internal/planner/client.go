@@ -105,10 +105,19 @@ func BuildToolDefinitions(registry *tools.Registry) []ToolDefinition {
 	return defs
 }
 
-// Call sends messages to the LLM and returns its response
+// Call sends messages to the LLM and returns its response (uses default model glm-5).
 func (p *Planner) Call(messages []Message, toolDefs []ToolDefinition) (*Message, error) {
+	return p.CallWithModel(messages, toolDefs, "glm-5", "bearer")
+}
+
+// CallWithModel sends messages to the LLM with a specific model and auth type.
+func (p *Planner) CallWithModel(messages []Message, toolDefs []ToolDefinition, model, authType string) (*Message, error) {
+	if model == "" {
+		model = "glm-5"
+	}
+
 	reqBody := ChatRequest{
-		Model:       "glm-5",
+		Model:       model,
 		Messages:    messages,
 		Tools:       toolDefs,
 		Temperature: 0.2,
@@ -124,7 +133,7 @@ func (p *Planner) Call(messages []Message, toolDefs []ToolDefinition) (*Message,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
+	if p.apiKey != "" && authType != "none" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 
