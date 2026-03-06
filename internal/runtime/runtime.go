@@ -444,9 +444,11 @@ func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
 	return r.executeToolCalls(s, messages, resp, 0, r.newRunLimits())
 }
 
-// executeToolCalls runs actual tools using the beforeToolCall pattern from openclaw:
-// detect loop BEFORE executing, block/warn without wasting execution time,
+// executeToolCalls runs actual tools using the beforeToolCall pattern:
+// detect loop BEFORE executing, block on critical only,
 // then record outcome AFTER execution for no-progress tracking.
+// Warning-level detections do NOT skip execution — they append a note to the
+// tool result so the LLM is aware but work continues uninterrupted.
 func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int, limits *runLimits) (string, bool) {
 	if r.isTimedOut(limits) {
 		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
@@ -462,7 +464,7 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 		// Budget checks
 		if r.cfg.MaxToolCalls > 0 && limits.toolCalls >= r.cfg.MaxToolCalls {
 			log.Printf("[session=%s] Tool call limit reached (%d). Stopping.", s.ID, r.cfg.MaxToolCalls)
-			msg := fmt.Sprintf("Tool call limit reached (%d). Stopping to avoid loops.", r.cfg.MaxToolCalls)
+			msg := fmt.Sprintf("Tool call limit reached (%d). Please summarize what you accomplished so far.", r.cfg.MaxToolCalls)
 			return r.finishWithMessage(s, msg), false
 		}
 		if r.isTimedOut(limits) {
@@ -472,14 +474,17 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 
 		argsHash := HashToolCall(tc.Function.Name, tc.Function.Arguments)
 
-		// ---- beforeToolCall: detect loop BEFORE executing (openclaw pattern) ----
+		// ---- beforeToolCall: detect loop BEFORE executing ----
 		det := DetectToolCallLoop(s.LoopState, tc.Function.Name, argsHash, loopCfg)
+		warningNote := ""
+
 		if det.Stuck {
 			log.Printf("[session=%s] Loop detected before exec: detector=%s level=%s count=%d msg=%s",
 				s.ID, det.Detector, det.Level, det.Count, det.Message)
 
 			if det.Level == LevelCritical {
-				// Critical: block execution, inject error as tool result, abort session
+				// Critical: block execution, inject error as tool result, abort session.
+				// This only fires for severe cases (20+ identical no-progress calls).
 				toolResultMsg := planner.Message{
 					Role:       "tool",
 					Content:    "BLOCKED: " + det.Message,
@@ -490,22 +495,12 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 				return r.finishWithMessage(s, det.Message), false
 			}
 
-			// Warning: skip execution, inject warning so LLM can self-correct
+			// Warning level: DO NOT skip execution. Execute normally but append
+			// a warning note so the LLM knows it may be repeating itself.
 			if ShouldEmitWarning(s.LoopState, det.WarningKey, det.Count) {
 				log.Printf("[session=%s] Loop warning emitted: %s", s.ID, det.Message)
 			}
-			toolResultMsg := planner.Message{
-				Role:       "tool",
-				Content:    "WARNING — tool execution skipped: " + det.Message + "\nDo NOT retry with the same arguments. Try a different approach or report the task as failed.",
-				ToolCallID: tc.ID,
-			}
-			s.History = append(s.History, toolResultMsg)
-			messages = append(messages, toolResultMsg)
-			// Record as a skipped call so future detection counts it
-			RecordToolCall(s.LoopState, tc.Function.Name, argsHash, tc.ID, loopCfg)
-			RecordToolCallOutcome(s.LoopState, tc.Function.Name, argsHash, tc.ID,
-				HashOutcome("skipped:loop-warning", true), loopCfg)
-			continue
+			warningNote = "\n\n⚠ LOOP WARNING: " + det.Message + " Consider changing your approach."
 		}
 
 		// ---- Record call (before execution, resultHash pending) ----
@@ -543,10 +538,10 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 		resultHash := HashOutcome(output, isError)
 		RecordToolCallOutcome(s.LoopState, tc.Function.Name, argsHash, tc.ID, resultHash, loopCfg)
 
-		// Add tool result message to history
+		// Add tool result message to history (with warning note if applicable)
 		toolResultMsg := planner.Message{
 			Role:       "tool",
-			Content:    output,
+			Content:    output + warningNote,
 			ToolCallID: tc.ID,
 		}
 		s.History = append(s.History, toolResultMsg)

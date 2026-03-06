@@ -481,3 +481,6 @@ func TestResolveConfigEnforcesOrdering(t *testing.T) {
 		t.Fatalf("global (%d) should be > critical (%d)", cfg.GlobalCircuitBreakerThreshold, cfg.CriticalThreshold)
 	}
 }
+
+// ---- Tool-name burst detector ----
+

@@ -16,10 +16,10 @@ import (
 type DetectorKind string
 
 const (
-	DetectorGenericRepeat      DetectorKind = "generic_repeat"
-	DetectorKnownPollNoProgress DetectorKind = "known_poll_no_progress"
+	DetectorGenericRepeat        DetectorKind = "generic_repeat"
+	DetectorKnownPollNoProgress  DetectorKind = "known_poll_no_progress"
 	DetectorGlobalCircuitBreaker DetectorKind = "global_circuit_breaker"
-	DetectorPingPong           DetectorKind = "ping_pong"
+	DetectorPingPong             DetectorKind = "ping_pong"
 )
 
 // DetectionLevel indicates whether a detection is a soft warning or a hard block.
