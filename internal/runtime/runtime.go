@@ -114,6 +114,7 @@ func (r *Runtime) buildSystemPrompt(memoryCtx string) string {
 	}
 	readPrompt("soul.md")
 	readPrompt("rules.md")
+	readPrompt("tools.md")
 	if memoryCtx != "" {
 		sb.WriteString("\n--- CONTEXTO DE CONVERSAS ANTERIORES ---\n")
 		sb.WriteString(memoryCtx)
