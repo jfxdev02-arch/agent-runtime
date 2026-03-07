@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dev/agent-runtime/internal/runtime"
@@ -16,9 +17,10 @@ import (
 // typingInterval defines how often to resend the "typing" action.
 // Telegram's indicator expires after ~5 seconds, so we refresh every 4.
 const typingInterval = 4 * time.Second
-const progressFirstUpdate = 20 * time.Second
-const progressUpdateInterval = 30 * time.Second
-const maxProgressMessages = 5
+
+// progressThrottle is the minimum interval between status message edits
+// to avoid hitting Telegram's rate limits.
+const progressThrottle = 2 * time.Second
 
 type Bot struct {
 	token    string
@@ -38,9 +40,6 @@ func (b *Bot) Start() {
 		return
 	}
 	log.Println("Starting Telegram bot polling...")
-	// On startup, discard any pending updates to avoid re-processing old messages
-	// after a service restart. We fetch with offset=-1 to get the last update,
-	// then set our offset past it.
 	b.discardPendingUpdates()
 	for {
 		b.pollUpdates()
@@ -48,8 +47,6 @@ func (b *Bot) Start() {
 	}
 }
 
-// discardPendingUpdates fetches the latest pending update and advances the
-// offset past it, so old messages are not re-processed after a restart.
 func (b *Bot) discardPendingUpdates() {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=-1&timeout=0", b.token)
 	resp, err := http.Get(url)
@@ -114,16 +111,23 @@ func (b *Bot) pollUpdates() {
 				sid := b.getCurrentSession(chatID)
 				log.Printf("[telegram] Message from chat=%s session=%s: %s", chatID, sid, u.Message.Text)
 
-				// Show "typing..." while the agent processes the message
+				// Start typing indicator loop
 				start := time.Now()
 				typingDone := b.startTypingLoop(chatID)
-				progressDone := b.startProgressLoop(chatID)
-				reply, _ := b.rt.ProcessMessage(sid, u.Message.Text)
-				close(typingDone)   // stop typing indicator
-				close(progressDone) // stop progress messages
+
+				// Send initial status message that we will edit with progress
+				statusMsgID := b.sendMessageGetID(chatID, "\u2699\ufe0f Thinking...")
+
+				// Build progress callback — edits the status message in real-time
+				tracker := newProgressTracker(b, chatID, statusMsgID)
+				reply, _ := b.rt.ProcessMessageWithProgress(sid, u.Message.Text, tracker.onProgress)
+				close(typingDone)
 				elapsed := time.Since(start)
 
 				log.Printf("[telegram] Reply to chat=%s session=%s (took %s, %d chars)", chatID, sid, elapsed.Round(time.Millisecond), len(reply))
+
+				// Delete the status message now that we have the final reply
+				b.deleteMessage(chatID, statusMsgID)
 
 				if len(reply) > 4000 {
 					reply = reply[:4000] + "\n...[TRUNCATED]"
@@ -134,11 +138,89 @@ func (b *Bot) pollUpdates() {
 	}
 }
 
+// progressTracker manages real-time status updates via Telegram message editing.
+type progressTracker struct {
+	bot      *Bot
+	chatID   string
+	msgID    int
+	mu       sync.Mutex
+	lastEdit time.Time
+	steps    []string
+	lastText string
+}
+
+func newProgressTracker(bot *Bot, chatID string, msgID int) *progressTracker {
+	return &progressTracker{
+		bot:    bot,
+		chatID: chatID,
+		msgID:  msgID,
+	}
+}
+
+func (pt *progressTracker) onProgress(event runtime.ProgressEvent) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	var line string
+	switch event.Phase {
+	case runtime.PhaseThinking:
+		if event.Depth > 0 {
+			line = fmt.Sprintf("\u2699\ufe0f Thinking... (turn %d)", event.Depth+1)
+		} else {
+			line = "\u2699\ufe0f Thinking..."
+		}
+	case runtime.PhaseToolStart:
+		line = fmt.Sprintf("\u25b6\ufe0f %s", event.Message)
+	case runtime.PhaseToolEnd:
+		// Replace the last tool_start line with a completed version
+		if len(pt.steps) > 0 {
+			last := pt.steps[len(pt.steps)-1]
+			if strings.HasPrefix(last, "\u25b6\ufe0f") {
+				if strings.Contains(event.Message, "failed") {
+					pt.steps[len(pt.steps)-1] = fmt.Sprintf("\u274c %s", event.Message)
+				} else {
+					pt.steps[len(pt.steps)-1] = fmt.Sprintf("\u2705 %s", event.Message)
+				}
+				pt.throttledEdit()
+				return
+			}
+		}
+		line = fmt.Sprintf("\u2705 %s", event.Message)
+	case runtime.PhaseError:
+		line = fmt.Sprintf("\u274c Error: %s", event.Message)
+	default:
+		return
+	}
+
+	pt.steps = append(pt.steps, line)
+	pt.throttledEdit()
+}
+
+func (pt *progressTracker) throttledEdit() {
+	now := time.Now()
+	if now.Sub(pt.lastEdit) < progressThrottle {
+		return
+	}
+	pt.lastEdit = now
+
+	// Show last 8 steps to keep it compact
+	display := pt.steps
+	if len(display) > 8 {
+		display = display[len(display)-8:]
+	}
+	text := strings.Join(display, "\n")
+	if text == pt.lastText {
+		return
+	}
+	pt.lastText = text
+
+	go pt.bot.editMessage(pt.chatID, pt.msgID, text)
+}
+
 func (b *Bot) getCurrentSession(chatID string) string {
 	if sid, ok := b.sessions[chatID]; ok && sid != "" {
 		return sid
 	}
-	// Legacy-compatible default session id.
 	b.sessions[chatID] = chatID
 	return chatID
 }
@@ -229,6 +311,56 @@ func (b *Bot) sendMessage(chatID, text string) {
 	http.Post(url, "application/json", bytes.NewBuffer(body))
 }
 
+// sendMessageGetID sends a message and returns its message_id for later editing.
+func (b *Bot) sendMessageGetID(chatID, text string) int {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.token)
+	payload := map[string]string{"chat_id": chatID, "text": text}
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Ok     bool `json:"ok"`
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result.Result.MessageID
+}
+
+// editMessage edits an existing Telegram message.
+func (b *Bot) editMessage(chatID string, messageID int, text string) {
+	if messageID == 0 {
+		return
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", b.token)
+	payload := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"text":       text,
+	}
+	body, _ := json.Marshal(payload)
+	http.Post(url, "application/json", bytes.NewBuffer(body))
+}
+
+// deleteMessage removes a Telegram message.
+func (b *Bot) deleteMessage(chatID string, messageID int) {
+	if messageID == 0 {
+		return
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/deleteMessage", b.token)
+	payload := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+	}
+	body, _ := json.Marshal(payload)
+	http.Post(url, "application/json", bytes.NewBuffer(body))
+}
+
 // sendChatAction sends a chat action (e.g. "typing") to indicate activity.
 func (b *Bot) sendChatAction(chatID, action string) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendChatAction", b.token)
@@ -251,39 +383,6 @@ func (b *Bot) startTypingLoop(chatID string) chan struct{} {
 				return
 			case <-ticker.C:
 				b.sendChatAction(chatID, "typing")
-			}
-		}
-	}()
-	return done
-}
-
-// startProgressLoop sends periodic progress updates for long-running requests.
-func (b *Bot) startProgressLoop(chatID string) chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		first := time.NewTimer(progressFirstUpdate)
-		defer first.Stop()
-
-		select {
-		case <-done:
-			return
-		case <-first.C:
-			b.sendMessage(chatID, "Still working on your request. I will send the result as soon as it is ready.")
-		}
-
-		ticker := time.NewTicker(progressUpdateInterval)
-		defer ticker.Stop()
-		count := 0
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				count++
-				if count > maxProgressMessages {
-					return
-				}
-				b.sendMessage(chatID, "Processing is still in progress. Thanks for waiting.")
 			}
 		}
 	}()

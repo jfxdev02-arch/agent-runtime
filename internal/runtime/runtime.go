@@ -323,8 +323,14 @@ func (r *Runtime) callLLM(s *Session, messages []planner.Message, toolDefs []pla
 	return r.llm.Call(messages, toolDefs)
 }
 
-// ProcessMessage is the main entry point called by Web/Telegram interfaces
+// ProcessMessage is the main entry point called by Web/Telegram interfaces.
+// For real-time progress updates, use ProcessMessageWithProgress instead.
 func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
+	return r.ProcessMessageWithProgress(sessionID, userMessage, nil)
+}
+
+// ProcessMessageWithProgress is ProcessMessage with an optional progress callback.
+func (r *Runtime) ProcessMessageWithProgress(sessionID, userMessage string, onProgress ProgressCallback) (string, bool) {
 	log.Printf("[runtime] ProcessMessage session=%s msg=%q", sessionID, truncateLog(userMessage, 100))
 	s := r.GetSession(sessionID)
 	limits := r.newRunLimits()
@@ -334,7 +340,7 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 		msg := strings.ToUpper(strings.TrimSpace(userMessage))
 		if msg == "YES" || msg == "SIM" || msg == "Y" {
 			s.AwaitingConfirmation = false
-			return r.executeApprovedToolCalls(s)
+			return r.executeApprovedToolCalls(s, onProgress)
 		} else if msg == "NO" || msg == "NAO" || msg == "N" {
 			s.AwaitingConfirmation = false
 			s.PendingToolCalls = nil
@@ -367,11 +373,11 @@ func (r *Runtime) ProcessMessage(sessionID, userMessage string) (string, bool) {
 	messages = append(messages, s.History...)
 
 	// Agentic loop: keep calling LLM until it stops requesting tools
-	return r.agenticLoop(s, messages, 0, limits)
+	return r.agenticLoop(s, messages, 0, limits, onProgress)
 }
 
 // agenticLoop calls the LLM, handles tool calls, feeds results back, repeats
-func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int, limits *runLimits) (string, bool) {
+func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int, limits *runLimits, onProgress ProgressCallback) (string, bool) {
 	log.Printf("[runtime] agenticLoop session=%s depth=%d/%d toolCalls=%d/%d",
 		s.ID, depth, r.cfg.MaxTurns, limits.toolCalls, r.cfg.MaxToolCalls)
 
@@ -386,8 +392,16 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 		return r.finishWithMessage(s, summary), false
 	}
 
+	// Emit thinking phase
+	emitProgress(onProgress, ProgressEvent{
+		Phase:   PhaseThinking,
+		Message: "Thinking...",
+		Depth:   depth,
+	})
+
 	resp, err := r.callLLM(s, messages, r.toolDefs)
 	if err != nil {
+		emitProgress(onProgress, ProgressEvent{Phase: PhaseError, Message: err.Error(), Depth: depth})
 		return fmt.Sprintf("LLM error: %v", err), false
 	}
 
@@ -423,11 +437,11 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 	}
 
 	// All tools are LOW risk — execute immediately
-	return r.executeToolCalls(s, messages, resp, depth, limits)
+	return r.executeToolCalls(s, messages, resp, depth, limits, onProgress)
 }
 
 // executeApprovedToolCalls runs after user confirms
-func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
+func (r *Runtime) executeApprovedToolCalls(s *Session, onProgress ProgressCallback) (string, bool) {
 	if s.PendingToolCalls == nil || s.PendingAssistantMsg == nil {
 		return "No pending action.", false
 	}
@@ -441,7 +455,7 @@ func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
 	s.PendingToolCalls = nil
 	s.PendingAssistantMsg = nil
 
-	return r.executeToolCalls(s, messages, resp, 0, r.newRunLimits())
+	return r.executeToolCalls(s, messages, resp, 0, r.newRunLimits(), onProgress)
 }
 
 // executeToolCalls runs actual tools using the beforeToolCall pattern:
@@ -449,7 +463,7 @@ func (r *Runtime) executeApprovedToolCalls(s *Session) (string, bool) {
 // then record outcome AFTER execution for no-progress tracking.
 // Warning-level detections do NOT skip execution — they append a note to the
 // tool result so the LLM is aware but work continues uninterrupted.
-func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int, limits *runLimits) (string, bool) {
+func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int, limits *runLimits, onProgress ProgressCallback) (string, bool) {
 	if r.isTimedOut(limits) {
 		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
 	}
@@ -506,6 +520,19 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 		// ---- Record call (before execution, resultHash pending) ----
 		RecordToolCall(s.LoopState, tc.Function.Name, argsHash, tc.ID, loopCfg)
 
+		// ---- Emit tool_start event ----
+		toolArgsPreview := tc.Function.Arguments
+		if len(toolArgsPreview) > 200 {
+			toolArgsPreview = toolArgsPreview[:200] + "..."
+		}
+		emitProgress(onProgress, ProgressEvent{
+			Phase:    PhaseToolStart,
+			ToolName: tc.Function.Name,
+			ToolArgs: toolArgsPreview,
+			Message:  toolActionMessage(tc.Function.Name),
+			Depth:    depth,
+		})
+
 		// ---- Execute the tool ----
 		tool, err := r.registry.Get(tc.Function.Name)
 
@@ -534,6 +561,18 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 			r.store.LogToolExecution(s.ID, tc.Function.Name, tc.Function.Arguments, output, "OK")
 		}
 
+		// ---- Emit tool_end event ----
+		endMsg := fmt.Sprintf("%s completed", tc.Function.Name)
+		if isError {
+			endMsg = fmt.Sprintf("%s failed", tc.Function.Name)
+		}
+		emitProgress(onProgress, ProgressEvent{
+			Phase:    PhaseToolEnd,
+			ToolName: tc.Function.Name,
+			Message:  endMsg,
+			Depth:    depth,
+		})
+
 		// ---- Record outcome (after execution) ----
 		resultHash := HashOutcome(output, isError)
 		RecordToolCallOutcome(s.LoopState, tc.Function.Name, argsHash, tc.ID, resultHash, loopCfg)
@@ -549,13 +588,46 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 	}
 
 	// Call LLM again with tool results — it may want more tools or give final answer
-	return r.agenticLoop(s, messages, depth+1, limits)
+	return r.agenticLoop(s, messages, depth+1, limits, onProgress)
 }
 
 func (r *Runtime) finishWithMessage(s *Session, text string) string {
 	s.History = append(s.History, planner.Message{Role: "assistant", Content: text})
 	r.store.LogMessage(s.ID, "assistant", text)
 	return text
+}
+
+// emitProgress safely calls the progress callback if non-nil.
+func emitProgress(cb ProgressCallback, event ProgressEvent) {
+	if cb != nil {
+		cb(event)
+	}
+}
+
+// toolActionMessage returns a human-readable action message for a tool (OpenClaw-style).
+func toolActionMessage(toolName string) string {
+	switch toolName {
+	case "shell":
+		return "Running command..."
+	case "read_file", "workspace_list":
+		return "Reading file..."
+	case "write_file":
+		return "Writing file..."
+	case "patch_file":
+		return "Patching file..."
+	case "delete_file":
+		return "Deleting file..."
+	case "delegate":
+		return "Delegating to sub-agent..."
+	case "sessions_list":
+		return "Listing sessions..."
+	case "sessions_send":
+		return "Sending to session..."
+	case "sessions_history":
+		return "Fetching session history..."
+	default:
+		return fmt.Sprintf("Executing %s...", toolName)
+	}
 }
 
 func (r *Runtime) newRunLimits() *runLimits {
