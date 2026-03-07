@@ -31,6 +31,7 @@ type Config struct {
 	// New v1.2 features
 	MCPConfigPath    string // Path to MCP servers JSON config file
 	MaxContextTokens int    // Max tokens for context window management
+	TokenBudget      int    // Max cumulative tokens per agentic run (0 = unlimited)
 	EnableLSP        bool   // Enable LSP integration
 	EnableWatcher    bool   // Enable file watcher
 	EnableGitContext bool   // Enable git-aware context injection
@@ -62,6 +63,7 @@ func LoadConfig() *Config {
 		Models:           getEnv("MODELS", ""),
 		MCPConfigPath:    getEnv("MCP_CONFIG", ""),
 		MaxContextTokens: getEnvInt("MAX_CONTEXT_TOKENS", 128000),
+		TokenBudget:      getEnvInt("TOKEN_BUDGET", 500000),
 		EnableLSP:        getEnvBool("ENABLE_LSP", false),
 		EnableWatcher:    getEnvBool("ENABLE_WATCHER", true),
 		EnableGitContext: getEnvBool("ENABLE_GIT_CONTEXT", true),

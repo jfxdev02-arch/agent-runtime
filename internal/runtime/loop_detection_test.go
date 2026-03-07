@@ -231,8 +231,8 @@ func TestGenericRepeatWarning(t *testing.T) {
 	if result.Count != DefaultWarningThreshold {
 		t.Fatalf("expected count=%d, got %d", DefaultWarningThreshold, result.Count)
 	}
-	if !strings.Contains(result.Message, "WARNING") {
-		t.Fatalf("expected WARNING in message, got %s", result.Message)
+	if !strings.Contains(result.Message, "SELF-REFLECTION") && !strings.Contains(result.Message, "identical") {
+		t.Fatalf("expected self-reflection message, got %s", result.Message)
 	}
 }
 
@@ -288,8 +288,8 @@ func TestGlobalCircuitBreaker(t *testing.T) {
 	if result.Detector != DetectorGlobalCircuitBreaker {
 		t.Fatalf("expected detector=global_circuit_breaker, got %s", result.Detector)
 	}
-	if !strings.Contains(result.Message, "CRITICAL") {
-		t.Fatalf("expected CRITICAL in message")
+	if !strings.Contains(result.Message, "CIRCUIT BREAKER") && !strings.Contains(result.Message, "SELF-REFLECTION") {
+		t.Fatalf("expected CIRCUIT BREAKER or SELF-REFLECTION in message")
 	}
 }
 
@@ -482,5 +482,290 @@ func TestResolveConfigEnforcesOrdering(t *testing.T) {
 	}
 }
 
-// ---- Tool-name burst detector ----
+// ---- New feature tests ----
+
+// ---- Token Budget ----
+
+func TestTokenBudgetWarning(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		TokenBudget: 1000,
+	}
+
+	RecordTokenUsage(state, 400, 400) // 800/1000 = 80% -> warning
+	result := CheckTokenBudget(state, cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true at 80%% token budget")
+	}
+	if result.Level != LevelWarning {
+		t.Fatalf("expected level=warning, got %s", result.Level)
+	}
+	if result.Detector != DetectorTokenBudget {
+		t.Fatalf("expected detector=token_budget, got %s", result.Detector)
+	}
+	if result.SelfReflection == "" {
+		t.Fatalf("expected non-empty self-reflection")
+	}
+}
+
+func TestTokenBudgetCritical(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		TokenBudget: 1000,
+	}
+
+	RecordTokenUsage(state, 500, 500) // 1000/1000 = 100% -> critical
+	result := CheckTokenBudget(state, cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true at 100%% token budget")
+	}
+	if result.Level != LevelCritical {
+		t.Fatalf("expected level=critical, got %s", result.Level)
+	}
+	if !strings.Contains(result.SelfReflection, "BUDGET EXHAUSTED") {
+		t.Fatalf("expected BUDGET EXHAUSTED in self-reflection, got %s", result.SelfReflection)
+	}
+}
+
+func TestTokenBudgetBelowThreshold(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		TokenBudget: 1000,
+	}
+
+	RecordTokenUsage(state, 200, 200) // 400/1000 = 40% -> no trigger
+	result := CheckTokenBudget(state, cfg)
+	if result.Stuck {
+		t.Fatalf("expected stuck=false below 80%% threshold")
+	}
+}
+
+// ---- Per-Tool Budget ----
+
+func TestToolBudgetCritical(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		ToolBudgets: map[string]int{"shell": 5},
+	}
+
+	// Simulate 5 calls to shell
+	for i := 0; i < 5; i++ {
+		state.ToolCallCounts["shell"]++
+	}
+
+	result := CheckToolBudget(state, "shell", cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true when tool budget exhausted")
+	}
+	if result.Level != LevelCritical {
+		t.Fatalf("expected level=critical, got %s", result.Level)
+	}
+	if result.Detector != DetectorToolBudget {
+		t.Fatalf("expected detector=tool_budget, got %s", result.Detector)
+	}
+}
+
+func TestToolBudgetWarning(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		ToolBudgets: map[string]int{"shell": 10},
+	}
+
+	// 8/10 = 80% -> warning
+	for i := 0; i < 8; i++ {
+		state.ToolCallCounts["shell"]++
+	}
+
+	result := CheckToolBudget(state, "shell", cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true at 80%% tool budget")
+	}
+	if result.Level != LevelWarning {
+		t.Fatalf("expected level=warning, got %s", result.Level)
+	}
+}
+
+func TestToolBudgetNoBudgetSet(t *testing.T) {
+	state := NewLoopState()
+	cfg := LoopDetectionConfig{
+		Enabled:     true,
+		ToolBudgets: map[string]int{"shell": 5},
+	}
+
+	// "read" has no budget set -> should not trigger
+	state.ToolCallCounts["read"] = 100
+	result := CheckToolBudget(state, "read", cfg)
+	if result.Stuck {
+		t.Fatalf("expected stuck=false for tool without budget")
+	}
+}
+
+// ---- Backoff ----
+
+func TestCalculateBackoffZeroForLowCount(t *testing.T) {
+	cfg := DefaultLoopDetectionConfig()
+	if CalculateBackoff(0, cfg) != 0 {
+		t.Fatalf("expected 0 backoff for count 0")
+	}
+	if CalculateBackoff(1, cfg) != 0 {
+		t.Fatalf("expected 0 backoff for count 1")
+	}
+}
+
+func TestCalculateBackoffExponential(t *testing.T) {
+	cfg := DefaultLoopDetectionConfig()
+
+	b2 := CalculateBackoff(2, cfg)
+	b3 := CalculateBackoff(3, cfg)
+	b4 := CalculateBackoff(4, cfg)
+
+	if b2 <= 0 {
+		t.Fatalf("expected positive backoff for count 2, got %d", b2)
+	}
+	if b3 <= b2 {
+		t.Fatalf("expected b3 > b2, got b3=%d b2=%d", b3, b2)
+	}
+	if b4 <= b3 {
+		t.Fatalf("expected b4 > b3, got b4=%d b3=%d", b4, b3)
+	}
+}
+
+func TestCalculateBackoffCapped(t *testing.T) {
+	cfg := DefaultLoopDetectionConfig()
+	b := CalculateBackoff(100, cfg) // very high count
+	if b > cfg.BackoffMaxMs {
+		t.Fatalf("expected backoff capped at %d, got %d", cfg.BackoffMaxMs, b)
+	}
+}
+
+func TestCalculateBackoffDisabled(t *testing.T) {
+	cfg := DefaultLoopDetectionConfig()
+	cfg.BackoffEnabled = false
+	if CalculateBackoff(10, cfg) != 0 {
+		t.Fatalf("expected 0 when backoff disabled")
+	}
+}
+
+// ---- Abort ----
+
+func TestAbortFlag(t *testing.T) {
+	state := NewLoopState()
+	if state.IsAborted() {
+		t.Fatalf("expected not aborted initially")
+	}
+
+	state.Abort("user cancelled")
+	if !state.IsAborted() {
+		t.Fatalf("expected aborted after Abort()")
+	}
+	if state.AbortReason != "user cancelled" {
+		t.Fatalf("expected reason 'user cancelled', got %s", state.AbortReason)
+	}
+
+	state.ResetAbort()
+	if state.IsAborted() {
+		t.Fatalf("expected not aborted after ResetAbort()")
+	}
+}
+
+func TestDetectLoopWithAbortFlag(t *testing.T) {
+	state := NewLoopState()
+	cfg := enabledConfig()
+	state.Abort("test abort")
+
+	result := DetectToolCallLoop(state, "read", "hash", cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true when aborted")
+	}
+	if result.Level != LevelCritical {
+		t.Fatalf("expected level=critical for abort, got %s", result.Level)
+	}
+	if !strings.Contains(result.SelfReflection, "ABORTED") {
+		t.Fatalf("expected ABORTED in self-reflection")
+	}
+}
+
+// ---- Self-Reflection ----
+
+func TestBuildSelfReflectionGenericRepeat(t *testing.T) {
+	state := NewLoopState()
+	det := LoopDetectionResult{
+		Detector: DetectorGenericRepeat,
+		Count:    10,
+	}
+	reflection := BuildSelfReflection(state, det, "read")
+	if !strings.Contains(reflection, "SELF-REFLECTION") {
+		t.Fatalf("expected SELF-REFLECTION in output")
+	}
+	if !strings.Contains(reflection, "read") {
+		t.Fatalf("expected tool name in reflection")
+	}
+	if !strings.Contains(reflection, "ACTIONS TO CONSIDER") {
+		t.Fatalf("expected actions in reflection")
+	}
+}
+
+func TestBuildSelfReflectionPingPong(t *testing.T) {
+	state := NewLoopState()
+	det := LoopDetectionResult{
+		Detector:       DetectorPingPong,
+		Count:          5,
+		PairedToolName: "write",
+	}
+	reflection := BuildSelfReflection(state, det, "read")
+	if !strings.Contains(reflection, "alternating") {
+		t.Fatalf("expected 'alternating' in ping-pong reflection")
+	}
+	if !strings.Contains(reflection, "write") {
+		t.Fatalf("expected paired tool name in reflection")
+	}
+}
+
+func TestDetectionResultContainsSelfReflection(t *testing.T) {
+	cfg := enabledConfig()
+	result := detectAfterRepeated("read", `{"path":"/same.txt"}`, "same output", DefaultWarningThreshold, cfg)
+	if !result.Stuck {
+		t.Fatalf("expected stuck=true")
+	}
+	if result.SelfReflection == "" {
+		t.Fatalf("expected non-empty SelfReflection in detection result")
+	}
+}
+
+// ---- RecordToolCall tracks ToolCallCounts ----
+
+func TestRecordToolCallIncreasesToolCounts(t *testing.T) {
+	state := NewLoopState()
+	cfg := enabledConfig()
+
+	RecordToolCall(state, "shell", "hash1", "call-1", cfg)
+	RecordToolCall(state, "shell", "hash2", "call-2", cfg)
+	RecordToolCall(state, "read", "hash3", "call-3", cfg)
+
+	if state.ToolCallCounts["shell"] != 2 {
+		t.Fatalf("expected shell count=2, got %d", state.ToolCallCounts["shell"])
+	}
+	if state.ToolCallCounts["read"] != 1 {
+		t.Fatalf("expected read count=1, got %d", state.ToolCallCounts["read"])
+	}
+}
+
+// ---- Token usage tracking ----
+
+func TestRecordTokenUsage(t *testing.T) {
+	state := NewLoopState()
+	RecordTokenUsage(state, 100, 50)
+	if state.TotalTokensUsed != 150 {
+		t.Fatalf("expected 150 total tokens, got %d", state.TotalTokensUsed)
+	}
+	RecordTokenUsage(state, 200, 100)
+	if state.TotalTokensUsed != 450 {
+		t.Fatalf("expected 450 total tokens, got %d", state.TotalTokensUsed)
+	}
+}
 

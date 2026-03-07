@@ -18,6 +18,7 @@ const (
 	EventError     EventType = "error"
 	EventDone      EventType = "done"
 	EventStatus    EventType = "status"
+	EventAbort     EventType = "abort"
 )
 
 // Event is a single SSE event sent to the client.
@@ -95,6 +96,13 @@ func (sw *Writer) Close() {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 	sw.closed = true
+}
+
+// IsClosed returns true if the writer has been closed.
+func (sw *Writer) IsClosed() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.closed
 }
 
 // StreamCallback is called by the planner with each token chunk.

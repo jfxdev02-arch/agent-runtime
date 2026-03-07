@@ -40,6 +40,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/", s.handleIndex)
 	http.HandleFunc("/api/chat", s.handleChat)
 	http.HandleFunc("/api/chat/stream", s.handleChatStream)
+	http.HandleFunc("/api/chat/abort", s.handleChatAbort)
 	http.HandleFunc("/api/chat/new", s.handleNewChat)
 	http.HandleFunc("/api/chat/history", s.handleChatHistory)
 	http.HandleFunc("/api/chat/compact", s.handleChatCompact)
@@ -639,6 +640,30 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 
 	reply, _ := s.rt.ProcessMessageWithProgress(req.SessionID, req.Message, progressCb)
 	sw.SendDone(reply)
+}
+
+// --- Stream Abort ---
+
+func (s *Server) handleChatAbort(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Reason    string `json:"reason"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	if req.Reason == "" {
+		req.Reason = "user cancelled"
+	}
+	s.rt.AbortSession(req.SessionID, req.Reason)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "aborted", "session_id": req.SessionID})
 }
 
 // --- Conversation Branching ---

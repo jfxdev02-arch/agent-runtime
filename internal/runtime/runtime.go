@@ -42,10 +42,11 @@ type Runtime struct {
 	fileWatch  *watcher.Watcher
 }
 
-// runLimits holds wall-clock and tool-call budget for a single ProcessMessage invocation.
+// runLimits holds budgets for a single ProcessMessage invocation.
 type runLimits struct {
-	deadline  time.Time
-	toolCalls int
+	deadline        time.Time
+	toolCalls       int
+	selfReflection  string // pending self-reflection to inject in next LLM call
 }
 
 func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry, llm *planner.Planner) *Runtime {
@@ -282,7 +283,16 @@ func (r *Runtime) loopConfig() LoopDetectionConfig {
 			KnownPollNoProgress: true,
 			PingPong:            true,
 		},
+		TokenBudget:    r.cfg.TokenBudget,
+		BackoffEnabled: true,
 	})
+}
+
+// AbortSession sets the abort flag on a session's loop state.
+func (r *Runtime) AbortSession(sessionID, reason string) {
+	s := r.GetSession(sessionID)
+	s.LoopState.Abort(reason)
+	log.Printf("[runtime] Session %s abort requested: %s", sessionID, reason)
 }
 
 func (r *Runtime) GetSession(id string) *Session {
@@ -623,15 +633,34 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 	log.Printf("[runtime] agenticLoop session=%s depth=%d/%d toolCalls=%d/%d",
 		s.ID, depth, r.cfg.MaxTurns, limits.toolCalls, r.cfg.MaxToolCalls)
 
+	// Check abort
+	if s.LoopState.IsAborted() {
+		log.Printf("[session=%s] Aborted by client: %s", s.ID, s.LoopState.AbortReason)
+		r.autoCheckpointOnBreaker(s, "abort")
+		return r.finishWithSummaryRequest(s, "[ABORTED] "+s.LoopState.AbortReason), false
+	}
+
+	// Soft deadline: at 80% of time budget, inject self-reflection; at 100%, request summary
 	if r.isTimedOut(limits) {
-		log.Printf("[session=%s] Global timeout reached (%ds). Stopping.", s.ID, r.cfg.MaxRunSeconds)
-		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+		log.Printf("[session=%s] Time budget exhausted. Requesting summary.", s.ID)
+		r.autoCheckpointOnBreaker(s, "time-budget")
+		return r.finishWithSummaryRequest(s,
+			"You have used all available processing time. "+
+			"Summarize what you accomplished and what tasks remain."), false
+	}
+	if r.isApproachingTimeout(limits) && limits.selfReflection == "" {
+		remaining := time.Until(limits.deadline).Round(time.Second)
+		limits.selfReflection = fmt.Sprintf(
+			"[TIME WARNING] You have approximately %s of processing time remaining. "+
+			"Prioritize completing your current task. Avoid starting new subtasks.", remaining)
 	}
 
 	if depth >= r.cfg.MaxTurns {
-		log.Printf("[session=%s] Turn limit (%d) reached. Stopping.", s.ID, r.cfg.MaxTurns)
-		summary := fmt.Sprintf("Turn limit (%d) reached. Stopping to avoid tool loops.", r.cfg.MaxTurns)
-		return r.finishWithMessage(s, summary), false
+		log.Printf("[session=%s] Turn limit (%d) reached. Requesting summary.", s.ID, r.cfg.MaxTurns)
+		r.autoCheckpointOnBreaker(s, "turn-limit")
+		return r.finishWithSummaryRequest(s,
+			fmt.Sprintf("You have used all %d available turns. "+
+			"Summarize what you accomplished and what tasks remain.", r.cfg.MaxTurns)), false
 	}
 
 	// Emit thinking phase
@@ -641,12 +670,20 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 		Depth:   depth,
 	})
 
-	// Use streaming if available and no tool calls expected in this turn
+	// Inject pending self-reflection as a system message
+	if limits.selfReflection != "" {
+		messages = append(messages, planner.Message{
+			Role:    "system",
+			Content: limits.selfReflection,
+		})
+		s.LoopState.ReflectionsSent++
+		limits.selfReflection = "" // consume it
+	}
+
 	var resp *planner.Message
 	var err error
 
 	if s.Settings.Streaming && onProgress != nil {
-		// Stream tokens: each token triggers a progress event
 		tokenCb := func(token string) {
 			emitProgress(onProgress, ProgressEvent{
 				Phase: PhaseToken,
@@ -722,8 +759,17 @@ func (r *Runtime) executeApprovedToolCalls(s *Session, onProgress ProgressCallba
 // Warning-level detections do NOT skip execution — they append a note to the
 // tool result so the LLM is aware but work continues uninterrupted.
 func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp *planner.Message, depth int, limits *runLimits, onProgress ProgressCallback) (string, bool) {
+	// Check abort before executing tools
+	if s.LoopState.IsAborted() {
+		r.autoCheckpointOnBreaker(s, "abort")
+		return r.finishWithSummaryRequest(s, "[ABORTED] "+s.LoopState.AbortReason), false
+	}
+
 	if r.isTimedOut(limits) {
-		return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+		r.autoCheckpointOnBreaker(s, "time-budget")
+		return r.finishWithSummaryRequest(s,
+			"You have used all available processing time. "+
+			"Summarize what you accomplished and what tasks remain."), false
 	}
 
 	// Add the assistant's message (with tool_calls) to history
@@ -735,12 +781,21 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 	for _, tc := range resp.ToolCalls {
 		// Budget checks
 		if r.cfg.MaxToolCalls > 0 && limits.toolCalls >= r.cfg.MaxToolCalls {
-			log.Printf("[session=%s] Tool call limit reached (%d). Stopping.", s.ID, r.cfg.MaxToolCalls)
-			msg := fmt.Sprintf("Tool call limit reached (%d). Please summarize what you accomplished so far.", r.cfg.MaxToolCalls)
-			return r.finishWithMessage(s, msg), false
+			log.Printf("[session=%s] Tool call budget exhausted (%d).", s.ID, r.cfg.MaxToolCalls)
+			r.autoCheckpointOnBreaker(s, "tool-budget")
+			return r.finishWithSummaryRequest(s,
+				fmt.Sprintf("You have used all %d available tool calls. "+
+				"Summarize what you accomplished and what tasks remain.", r.cfg.MaxToolCalls)), false
 		}
 		if r.isTimedOut(limits) {
-			return r.finishWithMessage(s, fmt.Sprintf("Global timeout reached (%ds). Stopping to avoid infinite loops.", r.cfg.MaxRunSeconds)), false
+			r.autoCheckpointOnBreaker(s, "time-budget")
+			return r.finishWithSummaryRequest(s,
+				"You have used all available processing time. "+
+				"Summarize what you accomplished and what tasks remain."), false
+		}
+		if s.LoopState.IsAborted() {
+			r.autoCheckpointOnBreaker(s, "abort")
+			return r.finishWithSummaryRequest(s, "[ABORTED] "+s.LoopState.AbortReason), false
 		}
 		limits.toolCalls++
 
@@ -751,28 +806,35 @@ func (r *Runtime) executeToolCalls(s *Session, messages []planner.Message, resp 
 		warningNote := ""
 
 		if det.Stuck {
-			log.Printf("[session=%s] Loop detected before exec: detector=%s level=%s count=%d msg=%s",
-				s.ID, det.Detector, det.Level, det.Count, det.Message)
+			log.Printf("[session=%s] Loop detected before exec: detector=%s level=%s count=%d",
+				s.ID, det.Detector, det.Level, det.Count)
 
 			if det.Level == LevelCritical {
-				// Critical: block execution, inject error as tool result, abort session.
-				// This only fires for severe cases (20+ identical no-progress calls).
+				// Critical: block execution, auto-checkpoint, inject self-reflection
+				r.autoCheckpointOnBreaker(s, string(det.Detector))
 				toolResultMsg := planner.Message{
 					Role:       "tool",
-					Content:    "BLOCKED: " + det.Message,
+					Content:    det.SelfReflection,
 					ToolCallID: tc.ID,
 				}
 				s.History = append(s.History, toolResultMsg)
 				messages = append(messages, toolResultMsg)
-				return r.finishWithMessage(s, det.Message), false
+				return r.finishWithSummaryRequest(s, det.SelfReflection), false
 			}
 
-			// Warning level: DO NOT skip execution. Execute normally but append
-			// a warning note so the LLM knows it may be repeating itself.
-			if ShouldEmitWarning(s.LoopState, det.WarningKey, det.Count) {
-				log.Printf("[session=%s] Loop warning emitted: %s", s.ID, det.Message)
+			// Warning level: apply backoff delay, then execute with self-reflection
+			if det.BackoffMs > 0 {
+				log.Printf("[session=%s] Backoff %dms before %s", s.ID, det.BackoffMs, tc.Function.Name)
+				time.Sleep(time.Duration(det.BackoffMs) * time.Millisecond)
 			}
-			warningNote = "\n\n⚠ LOOP WARNING: " + det.Message + " Consider changing your approach."
+
+			if ShouldEmitWarning(s.LoopState, det.WarningKey, det.Count) {
+				log.Printf("[session=%s] Loop warning emitted: %s", s.ID, string(det.Detector))
+			}
+
+			// Queue self-reflection for next LLM call
+			limits.selfReflection = det.SelfReflection
+			warningNote = "\n\n" + det.SelfReflection
 		}
 
 		// ---- Record call (before execution, resultHash pending) ----
@@ -855,6 +917,53 @@ func (r *Runtime) finishWithMessage(s *Session, text string) string {
 	return text
 }
 
+// finishWithSummaryRequest asks the LLM to summarize before stopping,
+// instead of returning a raw system error message to the user.
+func (r *Runtime) finishWithSummaryRequest(s *Session, reason string) string {
+	// Build a summary request for the LLM
+	summaryPrompt := fmt.Sprintf(
+		"%s\n\nProvide a concise summary of:\n"+
+		"1. What was accomplished\n"+
+		"2. What tasks remain incomplete\n"+
+		"3. Any issues encountered\n"+
+		"Respond in the same language as the conversation.", reason)
+
+	messages := []planner.Message{
+		{Role: "system", Content: "You are summarizing your work session. Be concise and helpful."},
+	}
+	// Include last few history messages for context
+	historySlice := s.History
+	if len(historySlice) > 6 {
+		historySlice = historySlice[len(historySlice)-6:]
+	}
+	messages = append(messages, historySlice...)
+	messages = append(messages, planner.Message{Role: "user", Content: summaryPrompt})
+
+	resp, err := r.callLLM(s, messages, nil)
+	if err != nil {
+		// If LLM fails, return the raw reason as fallback
+		return r.finishWithMessage(s, reason)
+	}
+
+	summary := resp.Content
+	if summary == "" {
+		return r.finishWithMessage(s, reason)
+	}
+
+	return r.finishWithMessage(s, summary)
+}
+
+// autoCheckpointOnBreaker saves a checkpoint when a circuit breaker or budget limit fires.
+func (r *Runtime) autoCheckpointOnBreaker(s *Session, reason string) {
+	label := fmt.Sprintf("auto-breaker-%s-%d", reason, len(s.History))
+	cpID, err := r.checkMgr.Save(s.ID, label, s.History, s.CheckpointState())
+	if err != nil {
+		log.Printf("[session=%s] Auto-checkpoint on breaker failed: %v", s.ID, err)
+		return
+	}
+	log.Printf("[session=%s] Auto-checkpoint saved on %s: %s", s.ID, reason, cpID)
+}
+
 // emitProgress safely calls the progress callback if non-nil.
 func emitProgress(cb ProgressCallback, event ProgressEvent) {
 	if cb != nil {
@@ -904,6 +1013,16 @@ func (r *Runtime) isTimedOut(limits *runLimits) bool {
 		return false
 	}
 	return time.Now().After(limits.deadline)
+}
+
+// isApproachingTimeout returns true when 80% of the time budget is consumed.
+func (r *Runtime) isApproachingTimeout(limits *runLimits) bool {
+	if limits == nil || limits.deadline.IsZero() || r.cfg.MaxRunSeconds <= 0 {
+		return false
+	}
+	totalDuration := time.Duration(r.cfg.MaxRunSeconds) * time.Second
+	elapsed := totalDuration - time.Until(limits.deadline)
+	return elapsed >= time.Duration(float64(totalDuration)*0.8)
 }
 
 // truncateLog shortens a string for logging purposes.
