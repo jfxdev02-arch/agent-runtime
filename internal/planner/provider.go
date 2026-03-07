@@ -150,6 +150,15 @@ func (mp *MultiPlanner) selectProvider(preferredID string) (*ModelProvider, erro
 
 // Call tries the preferred provider, then fails over to others.
 func (mp *MultiPlanner) Call(messages []Message, toolDefs []ToolDefinition, preferredID string) (*Message, error) {
+	return mp.callInternal(messages, toolDefs, preferredID, nil)
+}
+
+// CallStream tries the preferred provider with streaming, then fails over.
+func (mp *MultiPlanner) CallStream(messages []Message, toolDefs []ToolDefinition, preferredID string, onToken StreamCallback) (*Message, error) {
+	return mp.callInternal(messages, toolDefs, preferredID, onToken)
+}
+
+func (mp *MultiPlanner) callInternal(messages []Message, toolDefs []ToolDefinition, preferredID string, onToken StreamCallback) (*Message, error) {
 	mp.mu.RLock()
 	count := len(mp.providers)
 	mp.mu.RUnlock()
@@ -169,7 +178,6 @@ func (mp *MultiPlanner) Call(messages []Message, toolDefs []ToolDefinition, pref
 		}
 
 		if tried[provider.ID] {
-			// Already tried this one, skip
 			break
 		}
 		tried[provider.ID] = true
@@ -177,12 +185,17 @@ func (mp *MultiPlanner) Call(messages []Message, toolDefs []ToolDefinition, pref
 		log.Printf("[provider] Attempting call with provider=%s model=%s (attempt %d)", provider.ID, provider.Model, attempt+1)
 
 		p := &Planner{endpoint: provider.Endpoint, apiKey: provider.APIKey}
-		msg, err := p.CallWithModel(messages, toolDefs, provider.Model, provider.AuthType)
+		var msg *Message
+		if onToken != nil {
+			msg, err = p.CallWithModelStream(messages, toolDefs, provider.Model, provider.AuthType, onToken)
+		} else {
+			msg, err = p.CallWithModel(messages, toolDefs, provider.Model, provider.AuthType)
+		}
 		if err != nil {
 			lastErr = err
 			provider.RecordFailure()
 			log.Printf("[provider] Provider %s failed: %v. Trying next...", provider.ID, err)
-			preferredID = "" // clear preference for next attempt
+			preferredID = ""
 			continue
 		}
 

@@ -34,6 +34,12 @@ func main() {
 	reg.Register(tools.NewDelegateTool(orch))
 
 	rt := runtime.NewRuntime(cfg, store, reg, llm)
+	defer rt.Shutdown()
+
+	// Load MCP servers if configured
+	if cfg.MCPConfigPath != "" {
+		rt.LoadMCPServersFromConfig(cfg.MCPConfigPath)
+	}
 
 	// Register sessions_* tools (agent-to-agent coordination)
 	reg.Register(tools.NewSessionsListTool(rt))

@@ -15,6 +15,7 @@ import (
 
 	rt "github.com/dev/agent-runtime/internal/runtime"
 	"github.com/dev/agent-runtime/internal/storage"
+	"github.com/dev/agent-runtime/internal/streaming"
 	"github.com/dev/agent-runtime/internal/updater"
 )
 
@@ -38,15 +39,28 @@ func (s *Server) SetConfig(agentName, language string) {
 func (s *Server) Start() error {
 	http.HandleFunc("/", s.handleIndex)
 	http.HandleFunc("/api/chat", s.handleChat)
+	http.HandleFunc("/api/chat/stream", s.handleChatStream)
 	http.HandleFunc("/api/chat/new", s.handleNewChat)
 	http.HandleFunc("/api/chat/history", s.handleChatHistory)
 	http.HandleFunc("/api/chat/compact", s.handleChatCompact)
+	http.HandleFunc("/api/chat/fork", s.handleChatFork)
+	http.HandleFunc("/api/chat/branches", s.handleChatBranches)
+	http.HandleFunc("/api/chat/multimodal", s.handleChatMultimodal)
 	http.HandleFunc("/api/chats", s.handleChats)
 	http.HandleFunc("/api/chat/delete", s.handleChatDelete)
 	http.HandleFunc("/api/session/settings", s.handleSessionSettings)
+	http.HandleFunc("/api/checkpoint/save", s.handleCheckpointSave)
+	http.HandleFunc("/api/checkpoint/list", s.handleCheckpointList)
+	http.HandleFunc("/api/checkpoint/restore", s.handleCheckpointRestore)
 	http.HandleFunc("/api/providers", s.handleProviders)
 	http.HandleFunc("/api/providers/status", s.handleProviderStatus)
 	http.HandleFunc("/api/onboarding/validate", s.handleOnboardingValidate)
+	http.HandleFunc("/api/mcp/servers", s.handleMCPServers)
+	http.HandleFunc("/api/mcp/tools", s.handleMCPTools)
+	http.HandleFunc("/api/git/context", s.handleGitContext)
+	http.HandleFunc("/api/lsp/diagnostics", s.handleLSPDiagnostics)
+	http.HandleFunc("/api/watcher/changes", s.handleWatcherChanges)
+	http.HandleFunc("/api/cache/stats", s.handleCacheStats)
 	http.HandleFunc("/api/logs", s.handleLogs)
 	http.HandleFunc("/api/status", s.handleStatus)
 	http.HandleFunc("/api/settings", s.handleSettings)
@@ -573,6 +587,280 @@ func (s *Server) handleOnboardingValidate(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// --- SSE Streaming Chat ---
+
+func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		req.SessionID = "web-default"
+	}
+
+	sw := streaming.NewWriter(w)
+	if sw == nil {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+	defer sw.Close()
+
+	// Enable streaming for this session
+	sess := s.rt.GetSession(req.SessionID)
+	sess.Settings.Streaming = true
+	defer func() { sess.Settings.Streaming = false }()
+
+	// Progress callback that writes SSE events
+	progressCb := func(event rt.ProgressEvent) {
+		var sseEvent streaming.Event
+		switch event.Phase {
+		case rt.PhaseThinking:
+			sseEvent = streaming.Event{Type: streaming.EventThinking, Data: event.Message, Depth: event.Depth}
+		case rt.PhaseToken:
+			sseEvent = streaming.Event{Type: streaming.EventToken, Data: event.Token, Depth: event.Depth}
+		case rt.PhaseToolStart:
+			sseEvent = streaming.Event{Type: streaming.EventToolStart, Tool: event.ToolName, Args: event.ToolArgs, Data: event.Message, Depth: event.Depth}
+		case rt.PhaseToolEnd:
+			sseEvent = streaming.Event{Type: streaming.EventToolEnd, Tool: event.ToolName, Data: event.Message, Depth: event.Depth}
+		case rt.PhaseError:
+			sseEvent = streaming.Event{Type: streaming.EventError, Data: event.Message, Depth: event.Depth}
+		default:
+			return
+		}
+		sw.Send(sseEvent)
+	}
+
+	reply, _ := s.rt.ProcessMessageWithProgress(req.SessionID, req.Message, progressCb)
+	sw.SendDone(reply)
+}
+
+// --- Conversation Branching ---
+
+func (s *Server) handleChatFork(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		MsgIndex  int    `json:"msg_index"`
+		Label     string `json:"label"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	newID, err := s.rt.ForkSession(req.SessionID, req.MsgIndex, req.Label)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"session_id": newID, "parent_id": req.SessionID})
+}
+
+func (s *Server) handleChatBranches(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	branches, err := s.rt.GetBranches(sessionID)
+	if err != nil || branches == nil {
+		branches = []map[string]interface{}{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(branches)
+}
+
+// --- Multimodal Chat ---
+
+func (s *Server) handleChatMultimodal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string   `json:"session_id"`
+		Message   string   `json:"message"`
+		Images    []string `json:"images"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		req.SessionID = "web-default"
+	}
+
+	if len(req.Images) > 0 {
+		multiMsg := rt.NewMultimodalMessage(req.Message, req.Images)
+		sess := s.rt.GetSession(req.SessionID)
+		sess.History = append(sess.History, multiMsg)
+	}
+	reply, _ := s.rt.ProcessMessage(req.SessionID, req.Message)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"reply": reply, "session_id": req.SessionID})
+}
+
+// --- Checkpoints ---
+
+func (s *Server) handleCheckpointSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Label     string `json:"label"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	cpID, err := s.rt.SaveCheckpoint(req.SessionID, req.Label)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"checkpoint_id": cpID, "session_id": req.SessionID})
+}
+
+func (s *Server) handleCheckpointList(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		http.Error(w, "session_id is required", 400)
+		return
+	}
+	cps := s.rt.ListCheckpoints(sessionID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cps)
+}
+
+func (s *Server) handleCheckpointRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		SessionID    string `json:"session_id"`
+		CheckpointID string `json:"checkpoint_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.SessionID == "" || req.CheckpointID == "" {
+		http.Error(w, "session_id and checkpoint_id are required", 400)
+		return
+	}
+	if err := s.rt.RestoreCheckpoint(req.SessionID, req.CheckpointID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "restored", "session_id": req.SessionID})
+}
+
+// --- MCP Servers ---
+
+func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	mgr := s.rt.GetMCPManager()
+	if mgr == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"server_count": mgr.ServerCount(),
+		"tool_count":   mgr.ToolCount(),
+	})
+}
+
+func (s *Server) handleMCPTools(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	mgr := s.rt.GetMCPManager()
+	if mgr == nil {
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+	mcpTools := mgr.ListTools()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(mcpTools)
+}
+
+// --- Git Context ---
+
+func (s *Server) handleGitContext(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	gitCtx := s.rt.GetGitContext()
+	if gitCtx == nil || !gitCtx.IsRepo() {
+		json.NewEncoder(w).Encode(map[string]interface{}{"available": false})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"available":      true,
+		"branch":         gitCtx.Branch(),
+		"status":         gitCtx.Status(),
+		"recent_commits": gitCtx.RecentCommits(10),
+		"diff_unstaged":  gitCtx.DiffUnstaged(),
+		"diff_staged":    gitCtx.DiffStaged(),
+		"remote":         gitCtx.RemoteURL(),
+	})
+}
+
+// --- LSP Diagnostics ---
+
+func (s *Server) handleLSPDiagnostics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	lspMgr := s.rt.GetLSPManager()
+	if lspMgr == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"available": false})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"available":   true,
+		"servers":     lspMgr.ActiveServers(),
+		"diagnostics": lspMgr.GetAllDiagnostics(),
+	})
+}
+
+// --- File Watcher ---
+
+func (s *Server) handleWatcherChanges(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fw := s.rt.GetFileWatcher()
+	if fw == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"available": false})
+		return
+	}
+	since := 5 * time.Minute
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		if d, err := time.ParseDuration(sinceStr); err == nil {
+			since = d
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"available":  true,
+		"file_count": fw.FileCount(),
+		"changes":    fw.RecentChanges(since),
+	})
+}
+
+// --- Cache Stats ---
+
+func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	c := s.rt.GetCache()
+	if c == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{})
+		return
+	}
+	json.NewEncoder(w).Encode(c.GetStats())
 }
 
 // --- Helpers ---

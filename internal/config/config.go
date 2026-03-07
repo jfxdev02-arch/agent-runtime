@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -27,6 +28,13 @@ type Config struct {
 	Language        string
 	// Multi-model: "id:name:endpoint:key:model:priority||..." or empty for legacy single-model
 	Models string
+	// New v1.2 features
+	MCPConfigPath    string // Path to MCP servers JSON config file
+	MaxContextTokens int    // Max tokens for context window management
+	EnableLSP        bool   // Enable LSP integration
+	EnableWatcher    bool   // Enable file watcher
+	EnableGitContext bool   // Enable git-aware context injection
+	EnableMultimodal bool   // Enable multimodal (vision) support
 }
 
 func LoadConfig() *Config {
@@ -51,7 +59,13 @@ func LoadConfig() *Config {
 		MaxAgentDepth:   getEnvInt("MAX_AGENT_DEPTH", 3),
 		AgentName:       getEnv("AGENT_NAME", "Cronos"),
 		Language:        getEnv("LANGUAGE", "en"),
-		Models:          getEnv("MODELS", ""),
+		Models:           getEnv("MODELS", ""),
+		MCPConfigPath:    getEnv("MCP_CONFIG", ""),
+		MaxContextTokens: getEnvInt("MAX_CONTEXT_TOKENS", 128000),
+		EnableLSP:        getEnvBool("ENABLE_LSP", false),
+		EnableWatcher:    getEnvBool("ENABLE_WATCHER", true),
+		EnableGitContext: getEnvBool("ENABLE_GIT_CONTEXT", true),
+		EnableMultimodal: getEnvBool("ENABLE_MULTIMODAL", true),
 	}
 }
 
@@ -66,6 +80,18 @@ func getEnvInt(key string, fallback int) int {
 	if value, exists := os.LookupEnv(key); exists {
 		if n, err := strconv.Atoi(value); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		switch strings.ToLower(value) {
+		case "true", "1", "yes":
+			return true
+		case "false", "0", "no":
+			return false
 		}
 	}
 	return fallback

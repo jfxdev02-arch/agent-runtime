@@ -9,11 +9,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dev/agent-runtime/internal/cache"
+	"github.com/dev/agent-runtime/internal/checkpoint"
 	"github.com/dev/agent-runtime/internal/config"
+	"github.com/dev/agent-runtime/internal/context"
+	"github.com/dev/agent-runtime/internal/git"
+	"github.com/dev/agent-runtime/internal/lsp"
+	"github.com/dev/agent-runtime/internal/mcp"
 	"github.com/dev/agent-runtime/internal/memory"
 	"github.com/dev/agent-runtime/internal/planner"
 	"github.com/dev/agent-runtime/internal/storage"
 	"github.com/dev/agent-runtime/internal/tools"
+	"github.com/dev/agent-runtime/internal/watcher"
 )
 
 type Runtime struct {
@@ -25,6 +32,14 @@ type Runtime struct {
 	mem      *memory.MemoryAgent
 	toolDefs []planner.ToolDefinition
 	sessions map[string]*Session
+	// v1.2 components
+	cache      *cache.Cache
+	ctxMgr     *context.Manager
+	checkMgr   *checkpoint.Manager
+	gitCtx     *git.Context
+	lspMgr     *lsp.Manager
+	mcpMgr     *mcp.Manager
+	fileWatch  *watcher.Watcher
 }
 
 // runLimits holds wall-clock and tool-call budget for a single ProcessMessage invocation.
@@ -43,7 +58,39 @@ func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry,
 		mem:      memory.NewMemoryAgent(cfg.ZAIEndpoint, cfg.ZAIApiKey),
 		toolDefs: planner.BuildToolDefinitions(reg),
 		sessions: make(map[string]*Session),
+		// v1.2 components
+		cache:    cache.New(),
+		ctxMgr:   context.New(cfg.MaxContextTokens),
+		checkMgr: checkpoint.New(),
 	}
+
+	// Setup git context
+	if cfg.EnableGitContext {
+		rt.gitCtx = git.New(cfg.WorkspaceRoot)
+		if rt.gitCtx.IsRepo() {
+			log.Printf("[runtime] Git context enabled for %s (branch: %s)", cfg.WorkspaceRoot, rt.gitCtx.Branch())
+		}
+	}
+
+	// Setup file watcher
+	if cfg.EnableWatcher {
+		rt.fileWatch = watcher.New(cfg.WorkspaceRoot, 5*time.Second)
+		rt.fileWatch.Start()
+		log.Printf("[runtime] File watcher enabled for %s", cfg.WorkspaceRoot)
+	}
+
+	// Setup LSP
+	if cfg.EnableLSP {
+		rt.lspMgr = lsp.NewManager(cfg.WorkspaceRoot, nil)
+		rt.lspMgr.Start()
+		servers := rt.lspMgr.ActiveServers()
+		if len(servers) > 0 {
+			log.Printf("[runtime] LSP servers active: %v", servers)
+		}
+	}
+
+	// Setup MCP
+	rt.mcpMgr = mcp.NewManager()
 
 	// Setup multi-model providers
 	if cfg.Models != "" {
@@ -82,6 +129,145 @@ func NewRuntime(cfg *config.Config, store *storage.Storage, reg *tools.Registry,
 
 // GetMultiPlanner returns the multi-planner for external access (e.g., API).
 func (r *Runtime) GetMultiPlanner() *planner.MultiPlanner { return r.multi }
+
+// GetCache returns the cache for external access.
+func (r *Runtime) GetCache() *cache.Cache { return r.cache }
+
+// GetCheckpointManager returns the checkpoint manager.
+func (r *Runtime) GetCheckpointManager() *checkpoint.Manager { return r.checkMgr }
+
+// GetGitContext returns the git context provider.
+func (r *Runtime) GetGitContext() *git.Context { return r.gitCtx }
+
+// GetLSPManager returns the LSP manager.
+func (r *Runtime) GetLSPManager() *lsp.Manager { return r.lspMgr }
+
+// GetMCPManager returns the MCP manager.
+func (r *Runtime) GetMCPManager() *mcp.Manager { return r.mcpMgr }
+
+// GetFileWatcher returns the file watcher.
+func (r *Runtime) GetFileWatcher() *watcher.Watcher { return r.fileWatch }
+
+// RefreshToolDefs rebuilds tool definitions (e.g., after MCP tools change).
+func (r *Runtime) RefreshToolDefs() {
+	r.toolDefs = planner.BuildToolDefinitions(r.registry)
+	r.cache.InvalidateToolDefs()
+	log.Printf("[runtime] Tool definitions refreshed. Total tools: %d", len(r.toolDefs))
+}
+
+// LoadMCPServers loads and starts MCP servers, then registers their tools.
+func (r *Runtime) LoadMCPServers(configs []mcp.ServerConfig) int {
+	r.mcpMgr.LoadServers(configs)
+	count := mcp.RegisterMCPTools(r.mcpMgr, r.registry)
+	if count > 0 {
+		r.RefreshToolDefs()
+		log.Printf("[runtime] Registered %d MCP tools from %d servers", count, r.mcpMgr.ServerCount())
+	}
+	return count
+}
+
+// LoadMCPServersFromConfig reads a JSON config file and loads MCP servers.
+func (r *Runtime) LoadMCPServersFromConfig(path string) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Printf("[runtime] Could not read MCP config %s: %v", path, err)
+		return
+	}
+	var wrapper struct {
+		Servers []mcp.ServerConfig `json:"servers"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		log.Printf("[runtime] Invalid MCP config %s: %v", path, err)
+		return
+	}
+	r.LoadMCPServers(wrapper.Servers)
+}
+
+// ForkSession creates a new session branched from an existing one.
+func (r *Runtime) ForkSession(sourceSessionID string, msgIndex int, label string) (string, error) {
+	src := r.GetSession(sourceSessionID)
+	newID := r.NewSessionID("branch")
+	fork := src.Fork(newID, msgIndex, label)
+	r.sessions[newID] = fork
+	// Persist branch info
+	r.store.SaveBranch(newID, sourceSessionID, label, msgIndex)
+	log.Printf("[runtime] Forked session %s -> %s at message %d", sourceSessionID, newID, msgIndex)
+	return newID, nil
+}
+
+// GetBranches returns all branches of a session.
+func (r *Runtime) GetBranches(sessionID string) ([]map[string]interface{}, error) {
+	return r.store.GetBranches(sessionID)
+}
+
+// SaveCheckpoint saves a checkpoint for the current session state.
+func (r *Runtime) SaveCheckpoint(sessionID, label string) (string, error) {
+	s := r.GetSession(sessionID)
+	cpID, err := r.checkMgr.Save(sessionID, label, s.History, s.CheckpointState())
+	if err != nil {
+		return "", err
+	}
+	// Also persist to SQLite
+	histJSON, _ := json.Marshal(s.History)
+	stateJSON, _ := json.Marshal(s.CheckpointState())
+	r.store.SaveCheckpoint(cpID, sessionID, label, string(histJSON), string(stateJSON), len(s.History))
+	return cpID, nil
+}
+
+// RestoreCheckpoint rolls back a session to a previous checkpoint.
+func (r *Runtime) RestoreCheckpoint(sessionID, checkpointID string) error {
+	histJSON, stateJSON, err := r.checkMgr.Restore(sessionID, checkpointID)
+	if err != nil {
+		// Try from SQLite
+		histJSON, stateJSON, err = r.store.GetCheckpoint(checkpointID)
+		if err != nil {
+			return fmt.Errorf("checkpoint not found: %v", err)
+		}
+	}
+
+	s := r.GetSession(sessionID)
+
+	// Restore history
+	var history []planner.Message
+	if err := json.Unmarshal([]byte(histJSON), &history); err != nil {
+		return fmt.Errorf("failed to restore history: %v", err)
+	}
+	s.History = history
+
+	// Restore state
+	var state map[string]interface{}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err == nil {
+		s.RestoreState(state)
+	}
+
+	// Reset loop state
+	s.LoopState = NewLoopState()
+	s.AwaitingConfirmation = false
+	s.PendingToolCalls = nil
+	s.PendingAssistantMsg = nil
+
+	log.Printf("[runtime] Restored session %s to checkpoint %s (%d messages)", sessionID, checkpointID, len(history))
+	return nil
+}
+
+// ListCheckpoints returns checkpoints for a session.
+func (r *Runtime) ListCheckpoints(sessionID string) []checkpoint.Checkpoint {
+	return r.checkMgr.List(sessionID)
+}
+
+// Shutdown cleanly stops all subsystems.
+func (r *Runtime) Shutdown() {
+	if r.fileWatch != nil {
+		r.fileWatch.Stop()
+	}
+	if r.lspMgr != nil {
+		r.lspMgr.Stop()
+	}
+	if r.mcpMgr != nil {
+		r.mcpMgr.Stop()
+	}
+	log.Printf("[runtime] Shutdown complete")
+}
 
 // loopConfig builds a LoopDetectionConfig from the application config.
 func (r *Runtime) loopConfig() LoopDetectionConfig {
@@ -269,6 +455,12 @@ func (r *Runtime) GetSessionHistory(sessionID string, limit int) string {
 }
 
 func (r *Runtime) buildSystemPrompt(memoryCtx string, settings SessionSettings) string {
+	// Check cache first
+	cacheKey := cache.HashKey(settings.ThinkLevel, fmt.Sprintf("%v", settings.Verbose), memoryCtx)
+	if cached, ok := r.cache.GetSystemPrompt(cacheKey); ok {
+		return cached
+	}
+
 	var sb strings.Builder
 	readPrompt := func(name string) {
 		path := filepath.Join(r.cfg.PromptsDir, name)
@@ -298,12 +490,44 @@ func (r *Runtime) buildSystemPrompt(memoryCtx string, settings SessionSettings) 
 		sb.WriteString("[Verbose Mode: ON] Include details about tool executions and intermediate steps in your response.\n\n")
 	}
 
+	// Git context injection
+	if r.gitCtx != nil {
+		gitSummary := r.gitCtx.Summary()
+		if gitSummary != "" {
+			sb.WriteString("\n" + gitSummary + "\n")
+		}
+	}
+
+	// File watcher context injection
+	if r.fileWatch != nil {
+		watchSummary := r.fileWatch.Summary(5 * time.Minute)
+		if watchSummary != "" {
+			sb.WriteString("\n" + watchSummary + "\n")
+		}
+	}
+
+	// LSP diagnostics injection
+	if r.lspMgr != nil {
+		diagSummary := r.lspMgr.DiagnosticsSummary()
+		if diagSummary != "" {
+			sb.WriteString("\n" + diagSummary + "\n")
+		}
+	}
+
+	// MCP tools info
+	if r.mcpMgr != nil && r.mcpMgr.ToolCount() > 0 {
+		sb.WriteString(fmt.Sprintf("\n[MCP] %d external tools available from %d MCP servers.\n\n", r.mcpMgr.ToolCount(), r.mcpMgr.ServerCount()))
+	}
+
 	if memoryCtx != "" {
 		sb.WriteString("\n--- CONTEXTO DE CONVERSAS ANTERIORES ---\n")
 		sb.WriteString(memoryCtx)
 		sb.WriteString("\n--- FIM DO CONTEXTO ---\n\n")
 	}
-	return sb.String()
+
+	result := sb.String()
+	r.cache.SetSystemPrompt(cacheKey, result)
+	return result
 }
 
 func (r *Runtime) trimHistory(s *Session) {
@@ -320,6 +544,16 @@ func (r *Runtime) callLLM(s *Session, messages []planner.Message, toolDefs []pla
 		return r.multi.Call(messages, toolDefs, s.Settings.ModelID)
 	}
 	// Fallback to legacy single planner
+	return r.llm.Call(messages, toolDefs)
+}
+
+// callLLMStream routes the call through MultiPlanner with streaming.
+func (r *Runtime) callLLMStream(s *Session, messages []planner.Message, toolDefs []planner.ToolDefinition, onToken planner.StreamCallback) (*planner.Message, error) {
+	providers := r.multi.ListProviders()
+	if len(providers) > 0 {
+		return r.multi.CallStream(messages, toolDefs, s.Settings.ModelID, onToken)
+	}
+	// Fallback to legacy single planner (no streaming)
 	return r.llm.Call(messages, toolDefs)
 }
 
@@ -355,6 +589,11 @@ func (r *Runtime) ProcessMessageWithProgress(sessionID, userMessage string, onPr
 	r.store.LogMessage(sessionID, "user", userMessage)
 	r.trimHistory(s)
 
+	// Auto-checkpoint before processing (every 5 messages)
+	if len(s.History)%5 == 0 && len(s.History) > 0 {
+		r.checkMgr.Save(sessionID, fmt.Sprintf("auto-msg-%d", len(s.History)), s.History, s.CheckpointState())
+	}
+
 	// Memory Agent: retrieve relevant older context
 	memoryCtx := ""
 	olderMsgs, err := r.store.SearchOlderMessages(sessionID, r.cfg.MaxHistory*2, 100)
@@ -371,6 +610,9 @@ func (r *Runtime) ProcessMessageWithProgress(sessionID, userMessage string, onPr
 	systemPrompt := r.buildSystemPrompt(memoryCtx, s.Settings)
 	messages := []planner.Message{{Role: "system", Content: systemPrompt}}
 	messages = append(messages, s.History...)
+
+	// Context window management: intelligently truncate if needed
+	messages = r.ctxMgr.TruncateMessages(messages)
 
 	// Agentic loop: keep calling LLM until it stops requesting tools
 	return r.agenticLoop(s, messages, 0, limits, onProgress)
@@ -399,7 +641,23 @@ func (r *Runtime) agenticLoop(s *Session, messages []planner.Message, depth int,
 		Depth:   depth,
 	})
 
-	resp, err := r.callLLM(s, messages, r.toolDefs)
+	// Use streaming if available and no tool calls expected in this turn
+	var resp *planner.Message
+	var err error
+
+	if s.Settings.Streaming && onProgress != nil {
+		// Stream tokens: each token triggers a progress event
+		tokenCb := func(token string) {
+			emitProgress(onProgress, ProgressEvent{
+				Phase: PhaseToken,
+				Token: token,
+				Depth: depth,
+			})
+		}
+		resp, err = r.callLLMStream(s, messages, r.toolDefs, tokenCb)
+	} else {
+		resp, err = r.callLLM(s, messages, r.toolDefs)
+	}
 	if err != nil {
 		emitProgress(onProgress, ProgressEvent{Phase: PhaseError, Message: err.Error(), Depth: depth})
 		return fmt.Sprintf("LLM error: %v", err), false
@@ -626,6 +884,9 @@ func toolActionMessage(toolName string) string {
 	case "sessions_history":
 		return "Fetching session history..."
 	default:
+		if strings.HasPrefix(toolName, "mcp_") {
+			return fmt.Sprintf("Calling MCP tool %s...", toolName)
+		}
 		return fmt.Sprintf("Executing %s...", toolName)
 	}
 }

@@ -81,6 +81,32 @@ func (s *Storage) InitSchema() error {
 		notes TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS session_branches (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL,
+		parent_id TEXT DEFAULT '',
+		branch_label TEXT DEFAULT '',
+		branch_point INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS checkpoints (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		label TEXT DEFAULT '',
+		history TEXT DEFAULT '',
+		state TEXT DEFAULT '',
+		message_index INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS mcp_servers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		command TEXT NOT NULL,
+		args TEXT DEFAULT '',
+		env TEXT DEFAULT '',
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`)
 	return err
 }
@@ -335,6 +361,116 @@ func (s *Storage) StatsJSON() (string, error) {
 	st, _ := s.GetStats()
 	b, _ := json.Marshal(st)
 	return string(b), nil
+}
+
+// --- Session Branches ---
+
+func (s *Storage) SaveBranch(sessionID, parentID, label string, branchPoint int) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO session_branches (session_id, parent_id, branch_label, branch_point) VALUES (?, ?, ?, ?)`,
+		sessionID, parentID, label, branchPoint)
+	return err
+}
+
+func (s *Storage) GetBranches(parentID string) ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(`SELECT session_id, parent_id, branch_label, branch_point, created_at FROM session_branches WHERE parent_id = ? ORDER BY created_at DESC`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var branches []map[string]interface{}
+	for rows.Next() {
+		var sid, pid, label, createdAt string
+		var bp int
+		rows.Scan(&sid, &pid, &label, &bp, &createdAt)
+		branches = append(branches, map[string]interface{}{
+			"session_id":   sid,
+			"parent_id":    pid,
+			"branch_label": label,
+			"branch_point": bp,
+			"created_at":   createdAt,
+		})
+	}
+	return branches, nil
+}
+
+// --- Checkpoints ---
+
+func (s *Storage) SaveCheckpoint(id, sessionID, label, history, state string, msgIndex int) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO checkpoints (id, session_id, label, history, state, message_index) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, sessionID, label, history, state, msgIndex)
+	return err
+}
+
+func (s *Storage) GetCheckpoints(sessionID string) ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(`SELECT id, session_id, label, message_index, created_at FROM checkpoints WHERE session_id = ? ORDER BY created_at DESC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cps []map[string]interface{}
+	for rows.Next() {
+		var id, sid, label, createdAt string
+		var mi int
+		rows.Scan(&id, &sid, &label, &mi, &createdAt)
+		cps = append(cps, map[string]interface{}{
+			"id":            id,
+			"session_id":    sid,
+			"label":         label,
+			"message_index": mi,
+			"created_at":    createdAt,
+		})
+	}
+	return cps, nil
+}
+
+func (s *Storage) GetCheckpoint(id string) (string, string, error) {
+	var history, state string
+	err := s.db.QueryRow(`SELECT history, state FROM checkpoints WHERE id = ?`, id).Scan(&history, &state)
+	return history, state, err
+}
+
+func (s *Storage) DeleteCheckpoints(sessionID string) error {
+	_, err := s.db.Exec(`DELETE FROM checkpoints WHERE session_id = ?`, sessionID)
+	return err
+}
+
+// --- MCP Servers ---
+
+type MCPServerConfig struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Args    string `json:"args"`
+	Env     string `json:"env"`
+	Enabled bool   `json:"enabled"`
+}
+
+func (s *Storage) GetMCPServers() ([]MCPServerConfig, error) {
+	rows, err := s.db.Query(`SELECT id, name, command, args, env, enabled FROM mcp_servers ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var servers []MCPServerConfig
+	for rows.Next() {
+		var srv MCPServerConfig
+		var enabled int
+		rows.Scan(&srv.ID, &srv.Name, &srv.Command, &srv.Args, &srv.Env, &enabled)
+		srv.Enabled = enabled == 1
+		servers = append(servers, srv)
+	}
+	return servers, nil
+}
+
+func (s *Storage) SaveMCPServer(name, command, args, env string) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO mcp_servers (name, command, args, env) VALUES (?, ?, ?, ?)`,
+		name, command, args, env)
+	return err
+}
+
+func (s *Storage) DeleteMCPServer(name string) error {
+	_, err := s.db.Exec(`DELETE FROM mcp_servers WHERE name = ?`, name)
+	return err
 }
 
 func (s *Storage) Close() error {

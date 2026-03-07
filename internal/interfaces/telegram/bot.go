@@ -186,6 +186,11 @@ func (pt *progressTracker) onProgress(event runtime.ProgressEvent) {
 			}
 		}
 		line = fmt.Sprintf("\u2705 %s", event.Message)
+	case runtime.PhaseToken:
+		// Streaming tokens — skip in Telegram (too chatty)
+		return
+	case runtime.PhaseStatus:
+		line = fmt.Sprintf("ℹ️ %s", event.Message)
 	case runtime.PhaseError:
 		line = fmt.Sprintf("\u274c Error: %s", event.Message)
 	default:
